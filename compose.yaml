@@ -6,5 +6,5 @@ services:
     environment:
       ROKU_WALL_PASSWORD: ${ROKU_WALL_PASSWORD:?Set a password in .env}
     volumes:
-      - ./config.json:/app/config.json:ro
+      - ./config.json:/app/config.json
       - ./certs:/certs:ro
