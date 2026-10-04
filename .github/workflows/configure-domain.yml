@@ -108,4 +108,6 @@ jobs:
           sudo ln -sfn /etc/nginx/sites-available/roku.jlaramore.com /etc/nginx/sites-enabled/roku.jlaramore.com
           sudo nginx -t
           sudo systemctl reload nginx
+          curl --fail --silent --show-error --resolve roku.jlaramore.com:443:127.0.0.1 https://roku.jlaramore.com/healthz >/dev/null
+          echo 'Local Nginx HTTPS health check passed for roku.jlaramore.com.'
           REMOTE
