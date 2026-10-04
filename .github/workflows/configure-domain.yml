@@ -108,6 +108,13 @@ jobs:
           sudo ln -sfn /etc/nginx/sites-available/roku.jlaramore.com /etc/nginx/sites-enabled/roku.jlaramore.com
           sudo nginx -t
           sudo systemctl reload nginx
-          curl --fail --silent --show-error --resolve roku.jlaramore.com:443:127.0.0.1 https://roku.jlaramore.com/healthz >/dev/null
-          echo 'Local Nginx HTTPS health check passed for roku.jlaramore.com.'
+          echo '--- Roku certificate ---'
+          sudo openssl x509 -in /etc/letsencrypt/live/roku.jlaramore.com/fullchain.pem -noout -subject -issuer -ext subjectAltName
+          echo '--- Active Roku Nginx block ---'
+          sudo nginx -T 2>/dev/null | sed -n '/server_name roku.jlaramore.com/,+32p'
+          echo '--- Served certificate ---'
+          echo | openssl s_client -connect 127.0.0.1:443 -servername roku.jlaramore.com 2>/dev/null | openssl x509 -noout -subject -issuer -ext subjectAltName
+          echo '--- Local health ---'
+          curl -k --fail --silent --show-error --resolve roku.jlaramore.com:443:127.0.0.1 https://roku.jlaramore.com/healthz
+          echo
           REMOTE
