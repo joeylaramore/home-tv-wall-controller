@@ -101,16 +101,40 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         if not self.authorized():
             return
+        if self.path == "/api/discover":
+            try:
+                return self.reply(200, list(discover().values()))
+            except Exception as exc:
+                return self.reply(500, {"error": str(exc)})
         if self.path == "/api/tvs":
-            return self.reply(200, [{"name": tv["name"]} for tv in TVS])
+            return self.reply(200, [{"name": tv["name"], "paired": bool(tv.get("device_id") or tv.get("mac"))} for tv in TVS])
         return super().do_GET()
 
     def do_POST(self):
         if not self.authorized():
             return
         parts = self.path.split("/")
-        if len(parts) != 4 or parts[1] != "api" or parts[2] not in ("all", "0", "1", "2", "3") or parts[3] not in ("on", "off"):
+        if self.path == "/api/configure":
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length))
+            devices = payload.get("tvs", [])
+            if not isinstance(devices, list) or not devices or len(devices) > 100:
+                return self.reply(400, {"error": "Provide between 1 and 100 TVs"})
+            seen = set()
+            configured = []
+            for index, item in enumerate(devices):
+                device_id = str(item.get("device_id", "")).strip()
+                if not device_id or device_id in seen:
+                    return self.reply(400, {"error": "Each TV needs a unique discovered device ID"})
+                seen.add(device_id)
+                configured.append({"name": str(item.get("name") or f"TV {index + 1}").strip(), "device_id": device_id, "mac": "", "ip": str(item.get("ip", "")).strip()})
+            CONFIG_PATH.write_text(json.dumps({"tvs": configured}, indent=2) + "\n")
+            TVS[:] = configured
+            return self.reply(200, {"ok": True, "count": len(TVS)})
+        if len(parts) != 4 or parts[1] != "api" or parts[2] not in ("all",) and not parts[2].isdigit() or parts[3] not in ("on", "off"):
             return self.reply(404, {"error": "Unknown command"})
+        if parts[2] != "all" and (not parts[2].isdigit() or int(parts[2]) >= len(TVS)):
+            return self.reply(404, {"error": "Unknown TV"})
         origin = self.headers.get("Origin")
         host = self.headers.get("Host")
         if origin and origin not in (f"http://{host}", f"https://{host}"):
@@ -160,8 +184,8 @@ if __name__ == "__main__":
     if not CONFIG_PATH.exists():
         sys.exit("Copy config.example.json to config.json and set four TV identities")
     TVS = json.loads(CONFIG_PATH.read_text())["tvs"]
-    if len(TVS) != 4 or any(not (tv.get("device_id") or tv.get("mac")) for tv in TVS):
-        sys.exit("Configure exactly four TVs, each with device_id or mac")
+    if len(TVS) > 100:
+        sys.exit("Configure no more than 100 TVs in config.json")
     for tv in TVS:
         if tv.get("ip") and not ipaddress.ip_address(tv["ip"]).is_private:
             sys.exit("Optional cached IP must be a private LAN address")
