@@ -73,5 +73,5 @@ jobs:
           export DEPLOY_SHA="$SHA"
           docker compose up -d --build --remove-orphans
           docker compose ps
-          curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 2 https://127.0.0.1:8765/ >/dev/null || curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 2 http://127.0.0.1:8765/ >/dev/null
+          curl --insecure --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 2 https://127.0.0.1:8765/ >/dev/null
           REMOTE
