@@ -54,15 +54,7 @@ jobs:
         run: |
           set -euo pipefail
           ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "mkdir -p '$SERVER_PATH'"
-          rsync -az --delete \\
-            --exclude='.git/' \\
-            --exclude='.env' \\
-            --exclude='config.json' \\
-            --exclude='certs/' \\
-            --exclude='logs/' \\
-            --exclude='__pycache__/' \\
-            -e "ssh -p $SERVER_PORT" \\
-            ./ "$SERVER_USER@$SERVER_HOST:$SERVER_PATH/"
+          rsync -az --delete --exclude='.git/' --exclude='.env' --exclude='config.json' --exclude='certs/' --exclude='logs/' --exclude='__pycache__/' -e "ssh -p $SERVER_PORT" ./ "$SERVER_USER@$SERVER_HOST:$SERVER_PATH/"
 
       - name: Build and verify service
         shell: bash
