@@ -1,0 +1,33 @@
+name: Diagnose Roku discovery
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SERVER_HOST: ${{ secrets.SERVER_HOST || secrets.DEPLOY_HOST }}
+      SERVER_USER: ${{ secrets.SERVER_USER || 'joey' }}
+      SERVER_PORT: ${{ secrets.SERVER_PORT || '22' }}
+      SERVER_PATH: ${{ secrets.SERVER_PATH || '/home/joey/roku-app' }}
+      SSH_KEY: ${{ secrets.SERVER_SSH_KEY || secrets.DEPLOY_SSH_KEY }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "$SERVER_PORT" -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+
+      - name: Run discovery diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "cd '$SERVER_PATH' && docker compose exec -T roku-wall python /app/server.py --discover"
