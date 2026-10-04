@@ -1,0 +1,84 @@
+name: Deploy Roku Wall
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'server.py'
+      - 'web/**'
+      - 'Dockerfile'
+      - 'compose.yaml'
+      - '.dockerignore'
+      - '.github/workflows/deploy.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: roku-wall-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SERVER_HOST: ${{ secrets.SERVER_HOST || secrets.DEPLOY_HOST }}
+      SERVER_USER: ${{ secrets.SERVER_USER || 'joey' }}
+      SERVER_PORT: ${{ secrets.SERVER_PORT || '22' }}
+      SERVER_PATH: ${{ secrets.SERVER_PATH || '/home/joey/roku-app' }}
+      SSH_KEY: ${{ secrets.SERVER_SSH_KEY || secrets.DEPLOY_SSH_KEY }}
+    steps:
+      - name: Checkout revision
+        uses: actions/checkout@v4
+
+      - name: Validate deployment secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_HOST" || { echo 'Set SERVER_HOST or DEPLOY_HOST'; exit 1; }
+          test -n "$SSH_KEY" || { echo 'Set SERVER_SSH_KEY or DEPLOY_SSH_KEY'; exit 1; }
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "$SERVER_PORT" -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+
+      - name: Sync application
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "mkdir -p '$SERVER_PATH'"
+          rsync -az --delete \\
+            --exclude='.git/' \\
+            --exclude='.env' \\
+            --exclude='config.json' \\
+            --exclude='certs/' \\
+            --exclude='logs/' \\
+            --exclude='__pycache__/' \\
+            -e "ssh -p $SERVER_PORT" \\
+            ./ "$SERVER_USER@$SERVER_HOST:$SERVER_PATH/"
+
+      - name: Build and verify service
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "bash -s -- '$SERVER_PATH' '$GITHUB_SHA'" <<'REMOTE'
+          set -Eeuo pipefail
+          ROOT="$1"
+          SHA="$2"
+          cd "$ROOT"
+          test -f .env || { echo '.env is missing on the server'; exit 1; }
+          test -f config.json || { echo 'config.json is missing on the server'; exit 1; }
+          test -d certs || { echo 'certs directory is missing on the server'; exit 1; }
+          chmod 600 .env config.json
+          export DEPLOY_SHA="$SHA"
+          docker compose up -d --build --remove-orphans
+          docker compose ps
+          curl --fail --silent --show-error --retry 10 --retry-delay 2 https://127.0.0.1:8765/ >/dev/null || curl --fail --silent --show-error --retry 10 --retry-delay 2 http://127.0.0.1:8765/ >/dev/null
+          REMOTE
