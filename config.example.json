@@ -1,0 +1,8 @@
+{
+  "tvs": [
+    {"name": "Top left", "device_id": "REPLACE_WITH_DEVICE_ID", "mac": "", "ip": ""},
+    {"name": "Top right", "device_id": "REPLACE_WITH_DEVICE_ID", "mac": "", "ip": ""},
+    {"name": "Bottom left", "device_id": "REPLACE_WITH_DEVICE_ID", "mac": "", "ip": ""},
+    {"name": "Bottom right", "device_id": "REPLACE_WITH_DEVICE_ID", "mac": "", "ip": ""}
+  ]
+}
