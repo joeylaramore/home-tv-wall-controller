@@ -191,8 +191,6 @@ if __name__ == "__main__":
             sys.exit("Optional cached IP must be a private LAN address")
     if args.host not in ("127.0.0.1", "localhost", "::1") and not (args.cert and args.key):
         sys.exit("LAN access requires --cert and --key. See README.md")
-    if args.host not in ("127.0.0.1", "localhost", "::1") and not os.environ.get("ROKU_WALL_PASSWORD"):
-        sys.exit("LAN access requires ROKU_WALL_PASSWORD")
     server = http.server.ThreadingHTTPServer((args.host, args.port), Handler)
     if args.cert and args.key:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
