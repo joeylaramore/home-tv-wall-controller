@@ -1,0 +1,6 @@
+.git
+.env
+config.json
+certs
+*.pem
+__pycache__
