@@ -1,0 +1,78 @@
+name: Configure Roku public domain
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ secrets.SERVER_HOST || secrets.DEPLOY_HOST }}
+      SERVER_USER: ${{ secrets.SERVER_USER || 'joey' }}
+      SERVER_PORT: ${{ secrets.SERVER_PORT || '22' }}
+    steps:
+      - name: Validate deployment secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_HOST" || { echo 'Set SERVER_HOST or DEPLOY_HOST'; exit 1; }
+          test -n "${{ secrets.SERVER_SSH_KEY || secrets.DEPLOY_SSH_KEY }}" || { echo 'Set SERVER_SSH_KEY or DEPLOY_SSH_KEY'; exit 1; }
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY || secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "$SERVER_PORT" -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+
+      - name: Install Nginx route and certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          if ! sudo -n true 2>/dev/null; then
+            echo "The deployment user needs passwordless sudo to configure Nginx and TLS."
+            exit 1
+          fi
+
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          cat >"$tmp" <<'NGINX'
+          server {
+              listen 80;
+              listen [::]:80;
+              server_name roku.jlaramore.com;
+
+              location / {
+                  proxy_pass https://127.0.0.1:8765;
+                  proxy_ssl_verify off;
+                  proxy_ssl_server_name on;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_read_timeout 60s;
+              }
+          }
+          NGINX
+
+          sudo install -m 0644 "$tmp" /etc/nginx/sites-available/roku.jlaramore.com
+          sudo ln -sfn /etc/nginx/sites-available/roku.jlaramore.com /etc/nginx/sites-enabled/roku.jlaramore.com
+          sudo nginx -t
+          sudo systemctl reload nginx
+
+          if command -v certbot >/dev/null 2>&1; then
+            sudo certbot --nginx -d roku.jlaramore.com --non-interactive --agree-tos --register-unsafely-without-email --redirect
+          else
+            echo "Nginx route installed, but certbot is not installed; HTTPS certificate still needs to be provisioned."
+          fi
+          REMOTE
