@@ -74,5 +74,5 @@ jobs:
           export DEPLOY_SHA="$SHA"
           docker compose up -d --build --remove-orphans
           docker compose ps
-          curl --insecure --http1.1 --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 2 https://127.0.0.1:8765/ >/dev/null
+          curl --insecure --http1.1 --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 2 https://127.0.0.1:8765/healthz >/dev/null
           REMOTE
