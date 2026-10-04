@@ -65,9 +65,10 @@ jobs:
           ROOT="$1"
           SHA="$2"
           cd "$ROOT"
-          test -f .env || { echo '.env is missing on the server'; exit 1; }
-          test -f config.json || { echo 'config.json is missing on the server'; exit 1; }
-          test -d certs || { echo 'certs directory is missing on the server'; exit 1; }
+          if [ ! -f .env ]; then printf '%s\\n' 'ROKU_WALL_PASSWORD=' > .env; fi
+          if [ ! -f config.json ]; then cp config.example.json config.json; fi
+          mkdir -p certs
+          if [ ! -f certs/roku-wall.pem ] || [ ! -f certs/roku-wall-key.pem ]; then command -v openssl >/dev/null || { echo 'openssl is required for first-run certificate generation'; exit 1; }; openssl req -x509 -nodes -newkey rsa:2048 -days 825 -keyout certs/roku-wall-key.pem -out certs/roku-wall.pem -subj "/CN=$SERVER_HOST" >/dev/null 2>&1; fi
           chmod 600 .env config.json
           export DEPLOY_SHA="$SHA"
           docker compose up -d --build --remove-orphans
