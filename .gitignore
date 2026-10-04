@@ -1,0 +1,7 @@
+config.json
+*.pem
+*.key
+.env
+__pycache__/
+*.pyc
+.DS_Store
