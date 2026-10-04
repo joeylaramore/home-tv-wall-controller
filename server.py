@@ -99,6 +99,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(WEB), **kwargs)
 
     def do_GET(self):
+        if self.path == "/healthz":
+            return self.reply(200, {"ok": True})
         if not self.authorized():
             return
         if self.path == "/api/discover":
