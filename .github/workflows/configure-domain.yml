@@ -67,7 +67,7 @@ jobs:
               }
           }
           HTTP
-            sudo install -m 0644 "$tmp" /etc/nginx/sites-available/roku.jlaramore.com
+            sudo install -m 0644 "$tmp" /etc/nginx/sites-available/roku.jlaramore.com.conf
             sudo ln -sfn /etc/nginx/sites-available/roku.jlaramore.com.conf /etc/nginx/sites-enabled/roku.jlaramore.com.conf
             sudo nginx -t
             sudo systemctl reload nginx
@@ -104,7 +104,7 @@ jobs:
           }
           HTTPS
 
-          sudo install -m 0644 "$tmp" /etc/nginx/sites-available/roku.jlaramore.com
+          sudo install -m 0644 "$tmp" /etc/nginx/sites-available/roku.jlaramore.com.conf
           sudo ln -sfn /etc/nginx/sites-available/roku.jlaramore.com.conf /etc/nginx/sites-enabled/roku.jlaramore.com.conf
           sudo nginx -t
           sudo systemctl reload nginx
