@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     network_mode: host # Linux host networking lets SSDP multicast discover Roku TVs.
     environment:
-      ROKU_WALL_PASSWORD: ${ROKU_WALL_PASSWORD:?Set a password in .env}
+      ROKU_WALL_PASSWORD: ${ROKU_WALL_PASSWORD:-}
     volumes:
       - ./config.json:/app/config.json
       - ./certs:/certs:ro
