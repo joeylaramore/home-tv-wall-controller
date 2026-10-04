@@ -57,6 +57,42 @@ def discover(timeout=3):
                     found[info["device-id"]] = {"ip": address[0], **info}
             except Exception:
                 continue
+    if found:
+        return found
+
+    # Some access points block SSDP multicast between wired and wireless
+    # clients. Fall back to a bounded private /24 scan of Roku's ECP port.
+    local_ip = None
+    for probe in ("192.0.2.1", "8.8.8.8"):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route_sock:
+                route_sock.connect((probe, 1))
+                candidate = route_sock.getsockname()[0]
+                if ipaddress.ip_address(candidate).is_private:
+                    local_ip = candidate
+                    break
+        except OSError:
+            continue
+    if not local_ip:
+        return found
+
+    prefix = ".".join(local_ip.split(".")[:3])
+    addresses = [f"{prefix}.{host}" for host in range(1, 255)]
+
+    def probe(address):
+        try:
+            info = device_info(address)
+            if info["device-id"]:
+                return info["device-id"], {"ip": address, **info}
+        except Exception:
+            return None
+        return None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+        for result in pool.map(probe, addresses):
+            if result:
+                device_id, info = result
+                found[device_id] = info
     return found
 
 
@@ -99,8 +135,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(WEB), **kwargs)
 
     def do_GET(self):
-        if self.path == "/healthz":
-            return self.reply(200, {"ok": True})
         if not self.authorized():
             return
         if self.path == "/api/discover":
