@@ -4,20 +4,32 @@ const discovered = document.querySelector('#discovered');
 const message = document.querySelector('#message');
 let tvs = [];
 let found = [];
+let editing = false;
+let draggedIndex = null;
 
 function render() {
   grid.replaceChildren();
   tvs.forEach((tv, index) => {
-    const tile = document.createElement('article'); tile.className = 'tile';
-    const heading = document.createElement('h2'); heading.textContent = tv.name;
+    const tile = document.createElement('article'); tile.className = 'tile'; tile.draggable = editing; tile.dataset.index = index;
+    const heading = editing ? document.createElement('input') : document.createElement('h2');
+    if (editing) { heading.className = 'tile-name'; heading.value = tv.name; heading.setAttribute('aria-label', `Name for TV ${index + 1}`); heading.addEventListener('input', () => { tv.name = heading.value; }); }
+    else heading.textContent = tv.name;
     const actions = document.createElement('div'); actions.className = 'tile-buttons';
     for (const [label, action] of [['On', 'on'], ['Off', 'off']]) {
       const button = document.createElement('button'); button.textContent = label; button.className = action;
       button.dataset.target = index; button.dataset.action = action; actions.append(button);
     }
     tile.append(heading, actions); grid.append(tile);
+    if (editing) {
+      tile.addEventListener('dragstart', () => { draggedIndex = index; tile.classList.add('dragging'); });
+      tile.addEventListener('dragend', () => tile.classList.remove('dragging'));
+      tile.addEventListener('dragover', event => event.preventDefault());
+      tile.addEventListener('drop', event => { event.preventDefault(); if (draggedIndex === null || draggedIndex === index) return; const [moved] = tvs.splice(draggedIndex, 1); tvs.splice(index, 0, moved); draggedIndex = null; render(); });
+    }
   });
   setup.hidden = tvs.length > 0;
+  document.querySelector('#edit-layout').hidden = tvs.length === 0 || editing;
+  document.querySelector('#save-layout').hidden = !editing;
 }
 
 async function load() {
@@ -44,11 +56,19 @@ document.querySelector('#discover').addEventListener('click', async () => {
 });
 
 document.querySelector('#save').addEventListener('click', async () => {
-  const selected = [...discovered.querySelectorAll('input:checked')].map((box, position) => ({name: `TV ${position + 1}`, device_id: found[Number(box.dataset.index)]['device-id'], ip: ''}));
+  const selected = [...discovered.querySelectorAll('input:checked')].map((box, position) => { const device = found[Number(box.dataset.index)]; return {name: device['user-device-name'] || `TV ${position + 1}`, device_id: device['device-id'], ip: device.ip || ''}; });
   if (!selected.length) return;
   const response = await fetch('/api/configure', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tvs:selected})});
   if (!response.ok) { message.textContent = 'Could not save the TV wall.'; return; }
   tvs = selected; render(); message.textContent = `${tvs.length} TVs saved.`;
+});
+
+document.querySelector('#edit-layout').addEventListener('click', () => { editing = true; render(); message.textContent = 'Drag TVs to reorder them and edit names, then save layout.'; });
+
+document.querySelector('#save-layout').addEventListener('click', async () => {
+  const response = await fetch('/api/configure', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tvs: tvs.map(tv => ({name: tv.name.trim() || 'Roku TV', device_id: tv.device_id, mac: tv.mac || '', ip: tv.ip || ''}))})});
+  if (!response.ok) { message.textContent = 'Could not save the layout.'; return; }
+  editing = false; render(); message.textContent = 'Layout saved.';
 });
 
 document.addEventListener('click', async event => {
