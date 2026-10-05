@@ -10,6 +10,7 @@ import pathlib
 import socket
 import ssl
 import sys
+import threading
 import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -140,9 +141,8 @@ def resolve(tv):
     raise ConnectionError("TV not found by its device ID or MAC on this network")
 
 
-def command(tv, action):
+def send_keypress(tv, action, ip):
     try:
-        ip = resolve(tv)
         request = urllib.request.Request(
             f"http://{ip}:8060/keypress/{action}", data=b"", method="POST"
         )
@@ -150,6 +150,42 @@ def command(tv, action):
             return {"name": tv["name"], "ok": response.status == 200}
     except Exception as exc:
         return {"name": tv["name"], "ok": False, "error": str(exc)}
+
+
+def command(tv, action):
+    """Resolve and send one command."""
+    try:
+        return send_keypress(tv, action, resolve(tv))
+    except Exception as exc:
+        return {"name": tv["name"], "ok": False, "error": str(exc)}
+
+
+def command_many(tvs, action):
+    """Resolve every TV first, then send the keypresses in one synchronized wave."""
+    def resolve_one(tv):
+        try:
+            return tv, resolve(tv), None
+        except Exception as exc:
+            return tv, None, exc
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(16, max(1, len(tvs)))) as pool:
+        resolved = list(pool.map(resolve_one, tvs))
+
+    ready = threading.Event()
+
+    def send_one(item):
+        tv, ip, error = item
+        if error:
+            return {"name": tv["name"], "ok": False, "error": str(error)}
+        ready.wait()
+        return send_keypress(tv, action, ip)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(16, max(1, len(resolved)))) as pool:
+        futures = [pool.submit(send_one, item) for item in resolved]
+        # All requests are queued before releasing the workers, so DNS/identity
+        # discovery cannot make one TV start much later than another.
+        ready.set()
+        return [future.result() for future in futures]
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -167,7 +203,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except Exception as exc:
                 return self.reply(500, {"error": str(exc)})
         if self.path == "/api/tvs":
-            return self.reply(200, [{"name": tv["name"], "paired": bool(tv.get("device_id") or tv.get("mac"))} for tv in TVS])
+            return self.reply(200, [{"name": tv["name"], "device_id": tv.get("device_id", ""), "mac": tv.get("mac", ""), "ip": tv.get("ip", ""), "paired": bool(tv.get("device_id") or tv.get("mac"))} for tv in TVS])
         return super().do_GET()
 
     def do_POST(self):
@@ -201,8 +237,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.reply(403, {"error": "Origin rejected"})
         targets = TVS if parts[2] == "all" else [TVS[int(parts[2])]]
         action = "PowerOn" if parts[3] == "on" else "PowerOff"
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-            result = list(pool.map(lambda tv: command(tv, action), targets))
+        result = command_many(targets, action) if parts[2] == "all" else [command(targets[0], action)]
         return self.reply(200, result)
 
     def reply(self, status, data):
