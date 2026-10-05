@@ -1,0 +1,61 @@
+name: Link Roku home router
+
+on:
+  workflow_dispatch:
+    inputs:
+      router_public_key:
+        description: Brume 2 WireGuard public key only
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  link:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SERVER_HOST: ${{ secrets.SERVER_HOST || secrets.DEPLOY_HOST }}
+      SERVER_USER: ${{ secrets.SERVER_USER || 'joey' }}
+      SERVER_PORT: ${{ secrets.SERVER_PORT || '22' }}
+      SSH_KEY: ${{ secrets.SERVER_SSH_KEY || secrets.DEPLOY_SSH_KEY }}
+      ROUTER_PUBLIC_KEY: ${{ inputs.router_public_key }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "$SERVER_PORT" -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+
+      - name: Register home router peer
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$ROUTER_PUBLIC_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]] || [[ "$(printf '%s' "$ROUTER_PUBLIC_KEY" | base64 -d | wc -c)" -ne 32 ]]; then
+            echo "Invalid WireGuard public key"
+            exit 1
+          fi
+          ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "sudo bash -se -- '$ROUTER_PUBLIC_KEY'" <<'REMOTE'
+          set -euo pipefail
+          peer_key="$1"
+          config=/etc/wireguard/roku-wall.conf
+          if grep -Fqx "PublicKey = $peer_key" "$config"; then
+            echo "Home router already registered"
+          elif grep -q '^\[Peer\]' "$config"; then
+            echo "A different peer already exists; manual review required"
+            exit 1
+          else
+            {
+              printf '\n[Peer]\n'
+              printf 'PublicKey = %s\n' "$peer_key"
+              printf 'AllowedIPs = 10.77.43.2/32, 192.168.1.0/24\n'
+            } >> "$config"
+            systemctl restart wg-quick@roku-wall
+          fi
+          wg show roku-wall
+          ip -4 route get 192.168.1.143
+          REMOTE
