@@ -1,0 +1,59 @@
+name: Prepare Roku WireGuard endpoint
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ secrets.SERVER_HOST || secrets.DEPLOY_HOST }}
+      SERVER_USER: ${{ secrets.SERVER_USER || 'joey' }}
+      SERVER_PORT: ${{ secrets.SERVER_PORT || '22' }}
+      SSH_KEY: ${{ secrets.SERVER_SSH_KEY || secrets.DEPLOY_SSH_KEY }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "$SERVER_PORT" -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+
+      - name: Prepare isolated WireGuard interface
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'sudo bash -se' <<'REMOTE'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          if ! command -v wg >/dev/null; then
+            apt-get update -qq
+            apt-get install -y -qq wireguard-tools
+          fi
+          install -m 700 -d /etc/wireguard
+          if [ ! -f /etc/wireguard/roku-wall.key ]; then
+            umask 077
+            wg genkey > /etc/wireguard/roku-wall.key
+          fi
+          if [ ! -f /etc/wireguard/roku-wall.conf ]; then
+            {
+              echo '[Interface]'
+              echo 'Address = 10.77.43.1/24'
+              echo 'ListenPort = 51827'
+              printf 'PrivateKey = '
+              cat /etc/wireguard/roku-wall.key
+            } > /etc/wireguard/roku-wall.conf
+            chmod 600 /etc/wireguard/roku-wall.conf
+          fi
+          ufw allow 51827/udp comment 'Roku WireGuard'
+          systemctl enable --now wg-quick@roku-wall
+          echo 'Server WireGuard public key:'
+          wg pubkey < /etc/wireguard/roku-wall.key
+          wg show roku-wall
+          REMOTE
