@@ -25,35 +25,28 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p "$SERVER_PORT" -H "$SERVER_HOST" >> ~/.ssh/known_hosts
 
-      - name: Prepare isolated WireGuard interface
+      - name: Set WireGuard server port
         shell: bash
         run: |
           set -euo pipefail
           ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'sudo bash -se' <<'REMOTE'
           set -euo pipefail
-          export DEBIAN_FRONTEND=noninteractive
-          if ! command -v wg >/dev/null; then
-            apt-get update -qq
-            apt-get install -y -qq wireguard-tools
-          fi
           install -m 700 -d /etc/wireguard
-          if [ ! -f /etc/wireguard/roku-wall.key ]; then
+          if [ ! -f /etc/wireguard/roku-wall.conf ]; then
             umask 077
             wg genkey > /etc/wireguard/roku-wall.key
-          fi
-          if [ ! -f /etc/wireguard/roku-wall.conf ]; then
             {
               echo '[Interface]'
               echo 'Address = 10.77.43.1/24'
-              echo 'ListenPort = 51827'
+              echo 'ListenPort = 443'
               printf 'PrivateKey = '
               cat /etc/wireguard/roku-wall.key
             } > /etc/wireguard/roku-wall.conf
             chmod 600 /etc/wireguard/roku-wall.conf
+          else
+            sed -i 's/^ListenPort = .*/ListenPort = 443/' /etc/wireguard/roku-wall.conf
           fi
-          ufw allow 51827/udp comment 'Roku WireGuard'
-          systemctl enable --now wg-quick@roku-wall
-          echo 'Server WireGuard public key:'
-          wg pubkey < /etc/wireguard/roku-wall.key
+          ufw allow 443/udp comment 'Roku WireGuard'
+          systemctl restart wg-quick@roku-wall
           wg show roku-wall
           REMOTE
