@@ -48,6 +48,7 @@ jobs:
           fi
           ufw allow 443/udp comment 'Roku WireGuard'
           systemctl restart wg-quick@roku-wall
+          ip route replace 192.168.1.0/24 dev roku-wall src 10.77.43.1
           if grep -q '^ROKU_SCAN_CIDRS=' /home/joey/roku-app/.env; then
             sed -i 's#^ROKU_SCAN_CIDRS=.*#ROKU_SCAN_CIDRS=192.168.1.0/24#' /home/joey/roku-app/.env
           else
@@ -55,6 +56,8 @@ jobs:
           fi
           cd /home/joey/roku-app
           docker compose up -d --build
+          echo 'Route:'
+          ip route get 192.168.1.143
           echo 'Testing Roku at 192.168.1.143:'
           curl --max-time 5 http://192.168.1.143:8060/query/device-info || true
           wg show roku-wall
