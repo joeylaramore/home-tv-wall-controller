@@ -57,27 +57,29 @@ def discover(timeout=3):
                     found[info["device-id"]] = {"ip": address[0], **info}
             except Exception:
                 continue
-    if found:
-        return found
+    # Multicast does not cross a routed VPN. Explicit networks let a controller
+    # scan a private LAN reached through a tunnel while keeping device IDs as
+    # the persisted identity.
+    configured = os.environ.get("ROKU_SCAN_CIDRS", "").strip()
+    if configured:
+        networks = []
+        for value in configured.split(","):
+            network = ipaddress.ip_network(value.strip(), strict=False)
+            if not isinstance(network, ipaddress.IPv4Network) or not network.is_private or network.prefixlen < 24:
+                raise ValueError("ROKU_SCAN_CIDRS requires private IPv4 /24 or smaller networks")
+            networks.append(network)
+        if sum(network.num_addresses for network in networks) > 1024:
+            raise ValueError("ROKU_SCAN_CIDRS exceeds 1024 addresses")
+        addresses = sorted({str(address) for network in networks for address in network.hosts()})
+    else:
+        # Some access points block SSDP multicast between wired and wireless
+        # clients. Fall back to a bounded private /24 scan of Roku's ECP port.
+        if found:
+            return found
+        addresses = local_scan_addresses()
 
-    # Some access points block SSDP multicast between wired and wireless
-    # clients. Fall back to a bounded private /24 scan of Roku's ECP port.
-    local_ip = None
-    for probe in ("192.0.2.1", "8.8.8.8"):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route_sock:
-                route_sock.connect((probe, 1))
-                candidate = route_sock.getsockname()[0]
-                if ipaddress.ip_address(candidate).is_private:
-                    local_ip = candidate
-                    break
-        except OSError:
-            continue
-    if not local_ip:
+    if not addresses:
         return found
-
-    prefix = ".".join(local_ip.split(".")[:3])
-    addresses = [f"{prefix}.{host}" for host in range(1, 255)]
 
     def probe(address):
         try:
@@ -94,6 +96,26 @@ def discover(timeout=3):
                 device_id, info = result
                 found[device_id] = info
     return found
+
+
+def local_scan_addresses():
+    """Return a bounded scan range for the server's default private route."""
+    local_ip = None
+    for probe in ("192.0.2.1", "8.8.8.8"):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route_sock:
+                route_sock.connect((probe, 1))
+                candidate = route_sock.getsockname()[0]
+                if ipaddress.ip_address(candidate).is_private:
+                    local_ip = candidate
+                    break
+        except OSError:
+            continue
+    if not local_ip:
+        return []
+
+    prefix = ".".join(local_ip.split(".")[:3])
+    return [f"{prefix}.{host}" for host in range(1, 255)]
 
 
 def matches(tv, info):
