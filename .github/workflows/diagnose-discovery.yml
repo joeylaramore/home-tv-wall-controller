@@ -30,4 +30,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "cd '$SERVER_PATH' && hostname -I && ip -4 route get 192.168.1.143 && curl --noproxy '*' --connect-timeout 3 --max-time 5 -sS -o /dev/null -w 'Roku ECP HTTP status: %{http_code}\n' http://192.168.1.143:8060/query/device-info || true"
+          ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "cd '$SERVER_PATH' && docker compose exec -T roku-wall python -c 'import server; print(server.device_info("192.168.1.143"))' || true"
           ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "cd '$SERVER_PATH' && docker compose exec -T roku-wall python /app/server.py --discover"
