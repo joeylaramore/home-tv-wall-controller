@@ -25,7 +25,7 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p "$SERVER_PORT" -H "$SERVER_HOST" >> ~/.ssh/known_hosts
 
-      - name: Set WireGuard server port
+      - name: Configure WireGuard and Roku scan network
         shell: bash
         run: |
           set -euo pipefail
@@ -48,5 +48,14 @@ jobs:
           fi
           ufw allow 443/udp comment 'Roku WireGuard'
           systemctl restart wg-quick@roku-wall
+          if grep -q '^ROKU_SCAN_CIDRS=' /home/joey/roku-app/.env; then
+            sed -i 's#^ROKU_SCAN_CIDRS=.*#ROKU_SCAN_CIDRS=192.168.1.0/24#' /home/joey/roku-app/.env
+          else
+            echo 'ROKU_SCAN_CIDRS=192.168.1.0/24' >> /home/joey/roku-app/.env
+          fi
+          cd /home/joey/roku-app
+          docker compose up -d --build
+          echo 'Testing Roku at 192.168.1.143:'
+          curl --max-time 5 http://192.168.1.143:8060/query/device-info || true
           wg show roku-wall
           REMOTE
