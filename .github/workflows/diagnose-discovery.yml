@@ -1,4 +1,4 @@
-name: Diagnose Roku discovery
+name: Diagnose Roku network
 
 on:
   workflow_dispatch:
@@ -14,7 +14,6 @@ jobs:
       SERVER_HOST: ${{ secrets.SERVER_HOST || secrets.DEPLOY_HOST }}
       SERVER_USER: ${{ secrets.SERVER_USER || 'joey' }}
       SERVER_PORT: ${{ secrets.SERVER_PORT || '22' }}
-      SERVER_PATH: ${{ secrets.SERVER_PATH || '/home/joey/roku-app' }}
       SSH_KEY: ${{ secrets.SERVER_SSH_KEY || secrets.DEPLOY_SSH_KEY }}
     steps:
       - name: Configure SSH
@@ -26,10 +25,8 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p "$SERVER_PORT" -H "$SERVER_HOST" >> ~/.ssh/known_hosts
 
-      - name: Run discovery diagnostics
+      - name: Inspect WireGuard prerequisites
         shell: bash
         run: |
           set -euo pipefail
-          ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "cd '$SERVER_PATH' && hostname -I && ip -4 route get 192.168.1.143 && curl --noproxy '*' --connect-timeout 3 --max-time 5 -sS -o /dev/null -w 'Roku ECP HTTP status: %{http_code}\n' http://192.168.1.143:8060/query/device-info || true"
-          ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "cd '$SERVER_PATH' && docker compose exec -T roku-wall python -c 'import server; print(server.device_info("192.168.1.143"))' || true"
-          ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "cd '$SERVER_PATH' && docker compose exec -T roku-wall python /app/server.py --discover"
+          ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'uname -a; cat /etc/os-release; command -v wg || true; command -v wg-quick || true; command -v ufw || true; sudo -n true && echo sudo-available; ip -brief link; ip -4 route; sudo -n ufw status || true'
