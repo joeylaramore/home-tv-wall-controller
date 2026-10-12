@@ -213,3 +213,8 @@ document.querySelector('#discover-devices').addEventListener('click', async even
 document.addEventListener('click', async event => { const button=event.target.closest('button[data-sonos]'); if(!button)return; button.disabled=true; try { const response=await fetch(`/api/devices/sonos/${button.dataset.sonos}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({address:button.dataset.address})}); if(!response.ok) throw Error(); message.textContent=`Sonos ${button.dataset.sonos} command sent.`; } catch(_){message.textContent='Could not control that Sonos speaker.';} finally{button.disabled=false;} });
 document.querySelectorAll('.bottom-nav button').forEach(button => button.addEventListener('click', () => { const page=button.dataset.page; document.querySelectorAll('.bottom-nav button').forEach(item=>item.classList.toggle('active',item===button)); document.querySelectorAll('main > .page').forEach(item=>item.hidden=item.id!==page); const settings=document.querySelector('#settings-page'); if(settings){ settings.hidden=page!=='settings-page'; if(page==='settings-page') settings.open=true; } window.scrollTo(0,0); }));
 
+
+const householdSelect = document.querySelector('#household-select');
+function loadHouseholds(){ const saved=JSON.parse(localStorage.getItem('tv-wall-households')||'["Home"]'); householdSelect.replaceChildren(); saved.forEach(name=>{const option=document.createElement('option'); option.value=name; option.textContent=name; householdSelect.append(option);}); }
+loadHouseholds();
+householdSelect.addEventListener('change',()=>{ message.textContent=`${householdSelect.value} selected. Discovery and controls use the currently connected network.`; });
