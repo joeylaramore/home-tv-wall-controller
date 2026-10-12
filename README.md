@@ -19,7 +19,7 @@ Each TV tile can select HDMI 1-4 or launch an installed Roku app. Clicking a til
 For example, this scene opens YouTube TV on every screen:
 
 ```json
-{"name":"NFL Sunday Ticket","actions":[{"target":"all","command":"launch_name","value":"YouTube TV"}]}
+{"name":"NFL Sunday Ticket","actions":[{"target":"all","command":"launch_name","value":"YouTube"}]}
 ```
 
 A 2x2 Apple TV wall scene can switch every TV to the processor input:

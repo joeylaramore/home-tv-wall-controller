@@ -4,7 +4,7 @@
     {
       "name": "NFL Sunday Ticket",
       "actions": [
-        {"target": "all", "command": "launch_name", "value": "YouTube TV"}
+        {"target": "all", "command": "launch_name", "value": "YouTube"}
       ]
     },
     {
