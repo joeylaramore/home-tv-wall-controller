@@ -1,4 +1,10 @@
-# Roku Wall
+# Home TV Wall Controller
+
+## Apple TV and soundbar
+
+The controller can discover Apple TVs and send navigation/playback commands through the optional `pyatv` integration. On the controller host, run `atvremote scan`, then pair the Apple TV once with `atvremote --id <identifier> pair`; enter the PIN shown on the TV. Store the resulting pyatv credentials in the controller data directory as `apple-tv-credentials.json`, then use `GET /api/apple-tv/scan` and `POST /api/apple-tv/remote/<command>` (JSON body `{"address":"<private-ip>"}`). Supported commands are `up`, `down`, `left`, `right`, `select`, `menu`, `home`, `play`, `pause`, `stop`, `skip_forward`, and `skip_backward`. Pairing is deliberately local and interactive; do not expose these endpoints to the public internet.
+
+The TCL Alto 8i (TS8111) has no documented network control API. When it is connected to a Roku TV through HDMI ARC, the existing TV remote's volume and mute commands use Roku's HDMI-CEC path and control the soundbar. Use the scene that switches all TVs to HDMI 4 and mutes the wall, then unmute the single TV connected to ARC. Direct soundbar power/input control requires an IR blaster or a CEC adapter and is not assumed by this project.
 
 A self-hosted local network controller for a 2×2 wall of Roku TVs. Individual and group On/Off controls use each TV's device ID (or MAC address), so a changed IP does not move a TV to the wrong tile. This is an independent project and is not affiliated with Roku. Python 3.9+ with no Python dependencies.
 
@@ -74,3 +80,4 @@ ps w | grep -E 'server.py|nginx|uhttpd|cloudflared' | grep -v grep
 These are initial checks; a proxy or tunnel using a different name may require further inspection. Remove the controller's WAN forwarding rule or public proxy/tunnel route once identified. Allow TCP 8765 only from the LAN and the WireGuard client zone, keeping WireGuard's own WAN UDP listener and routing intact. Use the Nginx example in `deploy/roku.jlaramore.com.conf.example` to allow `192.168.1.0/24` and the WireGuard subnet while redirecting denied public requests to the GitHub project. Verify access from both the home LAN and WireGuard, then verify the old public URL and WAN port cannot reach the controller from outside the VPN. GitHub hosts source and installation instructions; it does not need a public controller endpoint.
 
 For a home router running AdGuard Home, add a DNS rewrite for the controller hostname to its WireGuard address (for example, `roku.jlaramore.com → 10.77.43.1`). Devices must use the home DNS service; clients using public DNS will resolve the public address and be denied.
+

@@ -19,6 +19,13 @@ import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
 
+try:
+    import pyatv
+    from pyatv.storage.file_storage import FileStorage
+except ImportError:  # Apple TV support is optional for source-only installs.
+    pyatv = None
+    FileStorage = None
+
 ROOT = pathlib.Path(__file__).resolve().parent
 WEB = ROOT / "web"
 CONFIG_PATH = pathlib.Path(os.environ.get("ROKU_CONFIG_PATH", str(ROOT / "config.json")))
@@ -28,6 +35,8 @@ LOCAL_NETWORKS = tuple(ipaddress.ip_network(value) for value in
                        ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"))
 TVS = []
 SCENES = []
+APPLE_TV_PAIRINGS = {}
+APPLE_TV_PAIRING_LOCK = threading.RLock()
 KEYPRESS_ACTIONS = {
     "Home", "Back", "Up", "Down", "Left", "Right", "Select",
     "Play", "Rev", "Fwd", "InstantReplay", "Info", "Search",
@@ -39,6 +48,76 @@ KEYPRESS_ACTIONS = {
 def local_address(value):
     address = ipaddress.ip_address(value)
     return address.is_loopback or any(address in network for network in LOCAL_NETWORKS)
+
+
+def apple_tv_scan(hosts=None):
+    if pyatv is None:
+        raise RuntimeError("Apple TV support is not installed")
+    import asyncio
+    async def run():
+        loop = asyncio.get_running_loop()
+        devices = await pyatv.scan(loop, timeout=3, hosts=hosts or None)
+        return [{"name": d.name, "address": str(d.address), "identifier": d.identifier,
+                 "services": [s.protocol.name for s in d.services]} for d in devices]
+    return asyncio.run(run())
+
+
+def apple_tv_remote(address, command):
+    """Send one pyatv remote command using credentials saved by pairing."""
+    if pyatv is None:
+        raise RuntimeError("Apple TV support is not installed")
+    allowed = {"up", "down", "left", "right", "select", "menu", "home",
+               "play", "pause", "stop", "skip_forward", "skip_backward"}
+    if command not in allowed:
+        raise ValueError("Unsupported Apple TV command")
+    import asyncio
+    async def run():
+        loop = asyncio.get_running_loop()
+        storage = FileStorage(str(CONFIG_PATH.parent / "apple-tv-credentials.json"), loop)
+        await storage.load()
+        devices = await pyatv.scan(loop, timeout=3, hosts=[address], storage=storage)
+        if not devices:
+            raise RuntimeError("Apple TV was not found")
+        atv = await pyatv.connect(devices[0], loop, storage=storage)
+        try:
+            await getattr(atv.remote_control, command)()
+        finally:
+            atv.close()
+    asyncio.run(run())
+
+
+def apple_tv_pair(address, pin=None):
+    if pyatv is None:
+        raise RuntimeError("Apple TV support is not installed")
+    import asyncio
+    async def run():
+        loop = asyncio.get_running_loop()
+        storage = FileStorage(str(CONFIG_PATH.parent / "apple-tv-credentials.json"), loop)
+        await storage.load()
+        devices = await pyatv.scan(loop, timeout=3, hosts=[address], storage=storage)
+        if not devices:
+            raise RuntimeError("Apple TV was not found")
+        from pyatv.const import Protocol
+        key = address
+        with APPLE_TV_PAIRING_LOCK:
+            pairing = APPLE_TV_PAIRINGS.get(key)
+        if pairing is None:
+            pairing = await pyatv.pair(devices[0], Protocol.MRP, loop, storage=storage)
+            await pairing.begin()
+            with APPLE_TV_PAIRING_LOCK:
+                APPLE_TV_PAIRINGS[key] = pairing
+            return {"ok": False, "pin_required": True}
+        if pin is None or not isinstance(pin, int) or not 0 <= pin <= 9999:
+            raise ValueError("PIN must be a four digit number")
+        pairing.pin(pin)
+        await pairing.finish()
+        paired = pairing.has_paired
+        if paired:
+            await storage.save()
+        with APPLE_TV_PAIRING_LOCK:
+            APPLE_TV_PAIRINGS.pop(key, None)
+        return {"ok": paired}
+    return asyncio.run(run())
 
 
 def validate_config(payload):
@@ -435,6 +514,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self.reply(200, youtube_live_games())
             except Exception as exc:
                 return self.reply(503, {"error": str(exc)})
+        if self.path == "/api/apple-tv/scan":
+            try:
+                return self.reply(200, apple_tv_scan())
+            except Exception as exc:
+                return self.reply(503, {"error": str(exc)})
         if re.fullmatch(r"/api/apps/[0-9]{1,3}", self.path):
             index = int(self.path.rsplit("/", 1)[1])
             with CONFIG_LOCK:
@@ -462,6 +546,36 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if (origin and origin not in (f"http://{host}", f"https://{host}")) or self.headers.get("Sec-Fetch-Site") == "cross-site":
             return self.reply(403, {"error": "Origin rejected"})
         parts = self.path.split("/")
+        apple_pair_match = re.fullmatch(r"/api/apple-tv/pair/(start|pin)", self.path)
+        if apple_pair_match:
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length)) if 0 < length <= 2048 else {}
+                address = payload.get("address", "")
+                if not isinstance(address, str) or not local_address(address):
+                    raise ValueError("Apple TV address must be private")
+                pin = payload.get("pin") if apple_pair_match.group(1) == "pin" else None
+                if pin is not None:
+                    pin = int(pin)
+                return self.reply(200, apple_tv_pair(address, pin))
+            except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                return self.reply(400, {"error": str(exc)})
+            except Exception as exc:
+                return self.reply(502, {"error": str(exc)})
+        apple_remote_match = re.fullmatch(r"/api/apple-tv/remote/([A-Za-z_]+)", self.path)
+        if apple_remote_match:
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length)) if 0 < length <= 2048 else {}
+                address = payload.get("address", "")
+                if not isinstance(address, str) or not local_address(address):
+                    raise ValueError("Apple TV address must be private")
+                apple_tv_remote(address, apple_remote_match.group(1))
+                return self.reply(200, {"ok": True})
+            except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                return self.reply(400, {"error": str(exc)})
+            except Exception as exc:
+                return self.reply(502, {"error": str(exc)})
         if self.path in ("/api/configure", "/api/restore"):
             if self.headers.get_content_type() != "application/json":
                 return self.reply(415, {"error": "Use application/json"})
