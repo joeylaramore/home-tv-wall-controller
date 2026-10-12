@@ -1,6 +1,6 @@
 # Roku Wall
 
-A local PWA for a 2×2 wall of Roku TVs. Individual and group On/Off controls, with positions tied to each Roku's device ID (or MAC address) so a changed IP does not move a TV to the wrong tile. Python 3.9+ with no Python dependencies.
+A self-hosted local network controller for a 2×2 wall of Roku TVs. Individual and group On/Off controls use each TV's device ID (or MAC address), so a changed IP does not move a TV to the wrong tile. This is an independent project and is not affiliated with Roku. Python 3.9+ with no Python dependencies.
 
 ## Set up your TVs
 
