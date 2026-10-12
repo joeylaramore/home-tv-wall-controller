@@ -17,7 +17,7 @@ function render() {
     const actions = document.createElement('div'); actions.className = 'tile-buttons';
     for (const [label, action] of [['On', 'on'], ['Off', 'off']]) {
       const button = document.createElement('button'); button.textContent = label; button.className = action;
-      button.dataset.target = index; button.dataset.action = action; actions.append(button);
+      button.dataset.target = index; button.dataset.action = action; button.disabled = editing; actions.append(button);
     }
     tile.append(heading, actions); grid.append(tile);
     if (editing) {
@@ -30,13 +30,15 @@ function render() {
   setup.hidden = tvs.length > 0;
   document.querySelector('#edit-layout').hidden = tvs.length === 0 || editing;
   document.querySelector('#save-layout').hidden = !editing;
+  document.querySelectorAll('.group button').forEach(button => { button.disabled = editing; });
 }
 
 async function load() {
   try {
-    const response = await fetch('/api/tvs', {cache:'no-store'}); tvs = await response.json(); render();
+    const response = await fetch('/api/tvs', {cache:'no-store'}); if (!response.ok) throw Error(); tvs = await response.json(); render();
     message.textContent = tvs.length ? 'Ready. Controls are sent over your local network.' : 'Discover your Roku TVs to get started.';
-  } catch (_) { message.textContent = 'Controller unavailable. Reconnect to your local network and reload.'; }
+    return true;
+  } catch (_) { message.textContent = 'Controller unavailable. Reconnect to your local network and reload.'; return false; }
 }
 
 document.querySelector('#discover').addEventListener('click', async () => {
@@ -69,6 +71,40 @@ document.querySelector('#save-layout').addEventListener('click', async () => {
   const response = await fetch('/api/configure', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tvs: tvs.map(tv => ({name: tv.name.trim() || 'Roku TV', device_id: tv.device_id, mac: tv.mac || '', ip: tv.ip || ''}))})});
   if (!response.ok) { message.textContent = 'Could not save the layout.'; return; }
   editing = false; render(); message.textContent = 'Layout saved.';
+});
+
+document.querySelector('#backup-config').addEventListener('click', async () => {
+  try {
+    const response = await fetch('/api/backup', {cache:'no-store'});
+    if (!response.ok) throw Error('Could not back up the configuration.');
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url; link.download = 'roku-wall-config.json';
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    message.textContent = 'Saved configuration downloaded. Save layout first to include unsaved edits.';
+  } catch (error) { message.textContent = error.message || 'Backup failed.'; }
+});
+
+const restoreFile = document.querySelector('#restore-file');
+document.querySelector('#restore-config').addEventListener('click', () => restoreFile.click());
+restoreFile.addEventListener('change', async () => {
+  const file = restoreFile.files[0];
+  if (!file) return;
+  const button = document.querySelector('#restore-config');
+  button.disabled = true;
+  try {
+    if (file.size > 262144) throw Error('Backup must be no larger than 256 KB.');
+    const config = JSON.parse(await file.text());
+    if (!window.confirm('Restore this backup and replace the current TV names and layout? The previous configuration will be saved on the controller.')) return;
+    const response = await fetch('/api/restore', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(config)});
+    const result = await response.json();
+    if (!response.ok) throw Error(result.error || 'Restore failed.');
+    editing = false;
+    const loaded = await load();
+    message.textContent = loaded ? 'Configuration restored. The previous configuration was saved on the controller.' : 'Configuration restored, but the TV list could not be refreshed. Reload to reconnect.';
+  } catch (error) { message.textContent = `Restore failed: ${error.message}`; }
+  finally { button.disabled = false; restoreFile.value = ''; }
 });
 
 document.addEventListener('click', async event => {

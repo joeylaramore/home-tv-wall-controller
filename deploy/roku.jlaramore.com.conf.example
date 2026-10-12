@@ -1,0 +1,44 @@
+## Replace the hostname, trusted subnets, and GitHub URL for your installation.
+## Keep the controller private; this vhost is the public-facing gate.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name roku.example.com;
+
+    allow 127.0.0.1/32;
+    allow ::1/128;
+    allow 192.168.1.0/24;
+    allow 10.77.43.0/24;
+    deny all;
+    error_page 403 =302 https://github.com/OWNER/REPOSITORY;
+
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name roku.example.com;
+
+    ssl_certificate /etc/letsencrypt/live/roku.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/roku.example.com/privkey.pem;
+
+    allow 127.0.0.1/32;
+    allow ::1/128;
+    allow 192.168.1.0/24;
+    allow 10.77.43.0/24;
+    deny all;
+    error_page 403 =302 https://github.com/OWNER/REPOSITORY;
+
+    location / {
+        proxy_pass https://127.0.0.1:8765;
+        proxy_ssl_verify off;
+        proxy_ssl_server_name on;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 60s;
+    }
+}

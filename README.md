@@ -34,6 +34,29 @@ On Windows PowerShell, set `$env:ROKU_WALL_PASSWORD = 'choose-a-long-unique-pass
 
 ## Linux server with Docker Compose
 
-Copy `config.example.json` to `config.json` and `.env.example` to `.env`, then set actual IDs and a unique password. Generate a certificate for the server's LAN IP, put it at `certs/roku-wall.pem` and its key at `certs/roku-wall-key.pem`, and grant the container user read access to both. Run `docker compose up -d --build`. Linux host networking permits SSDP multicast; the server listens on TCP 8765. Keep that port limited to the trusted LAN or VPN. Do not port-forward it to the public internet.
+Create `data/`, copy `config.example.json` to `data/config.json` and `.env.example` to `.env`, then set the TV identities and a strong password. For an existing installation, copy the current `config.json` to `data/config.json` before switching Compose versions; keep the original as a recovery copy. The directory mount allows safe atomic configuration updates and persists recovery backups. Generate a certificate for the server's LAN/VPN name, put it at `certs/roku-wall.pem` and its key at `certs/roku-wall-key.pem`, then run `docker compose up -d --build`. Linux host networking permits SSDP multicast; the server listens on TCP 8765. Keep that port private and place Nginx or another HTTPS reverse proxy in front of it. Do not port-forward the controller port to the public internet.
 
-`config.json`, `.env`, and certificate files are excluded from Git. The server requires HTTPS and a password when exposed on the LAN. The browser service worker caches only the interface; TV commands always go to the controller. A public release would need guided discovery/pairing and stronger device authentication before distribution.
+`config.json`, `.env`, and certificate files are excluded from Git. The browser service worker caches only the interface; TV commands always go to the controller. A public release would need guided discovery/pairing and stronger device authentication before distribution.
+
+## Back up and restore
+
+**Backup Configuration** downloads the saved `config.json`, including device IDs, MAC addresses, names, cached addresses, and the TV list order used for layout. Save layout edits before downloading. **Restore Configuration** selects a JSON backup and asks before replacing settings. The server validates the entire file before writing; malformed files, duplicate identities, public TV addresses, and files larger than 256 KB are rejected. Empty TV lists are supported for a fresh setup.
+
+Every save or restore first preserves the exact previous file in `config-backups/` beside the active configuration. The active file is then replaced atomically; a backup or write failure leaves the current configuration active. Restored settings take effect immediately. Recovery files stay on the controller, outside the website, and are never removed automatically. To recover, select one of those JSON files using Restore Configuration, or stop the server and copy it over the active config file.
+
+Direct Python installations still use the repository's `config.json`. Set `ROKU_CONFIG_PATH` to change its location. Docker uses `data/config.json` and stores recovery files in `data/config-backups/`. These files and directories are excluded from Git and Docker build contexts.
+
+## LAN and WireGuard access
+
+The server defaults to loopback on port 8765. Network listeners require HTTPS. With a password configured, the app also enforces HTTP Basic authentication. A passwordless deployment is supported only when `ROKU_ALLOW_UNAUTHENTICATED_NETWORK=1` is set and a reverse proxy/firewall strictly limits access to trusted networks; the application still rejects direct non-loopback requests without a password. Network ranges configured in `ROKU_ALLOWED_CIDRS` are checked by the application, but a reverse proxy must enforce the original client address when the app is proxied. Forwarded headers are not trusted by the application.
+
+Application filtering alone cannot block public traffic forwarded by a local reverse proxy or tunnel: the server sees the proxy's local address. Before changing the GL-MT2500, inspect the existing public entry point:
+
+```sh
+uci show firewall | grep -Ei 'redirect|8765|roku'
+ps w | grep -E 'server.py|nginx|uhttpd|cloudflared' | grep -v grep
+```
+
+These are initial checks; a proxy or tunnel using a different name may require further inspection. Remove the controller's WAN forwarding rule or public proxy/tunnel route once identified. Allow TCP 8765 only from the LAN and the WireGuard client zone, keeping WireGuard's own WAN UDP listener and routing intact. Use the Nginx example in `deploy/roku.jlaramore.com.conf.example` to allow `192.168.1.0/24` and the WireGuard subnet while redirecting denied public requests to the GitHub project. Verify access from both the home LAN and WireGuard, then verify the old public URL and WAN port cannot reach the controller from outside the VPN. GitHub hosts source and installation instructions; it does not need a public controller endpoint.
+
+For a home router running AdGuard Home, add a DNS rewrite for the controller hostname to its WireGuard address (for example, `roku.jlaramore.com → 10.77.43.1`). Devices must use the home DNS service; clients using public DNS will resolve the public address and be denied.

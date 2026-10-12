@@ -1,6 +1,8 @@
 .git
 .env
 config.json
+data
+config-backups
 certs
 *.pem
 __pycache__

@@ -5,7 +5,10 @@ services:
     network_mode: host # Linux host networking lets SSDP multicast discover Roku TVs.
     environment:
       ROKU_WALL_PASSWORD: ${ROKU_WALL_PASSWORD:-}
+      ROKU_ALLOW_UNAUTHENTICATED_NETWORK: ${ROKU_ALLOW_UNAUTHENTICATED_NETWORK:-0}
       ROKU_SCAN_CIDRS: ${ROKU_SCAN_CIDRS:-}
+      ROKU_ALLOWED_CIDRS: ${ROKU_ALLOWED_CIDRS:-}
+      ROKU_CONFIG_PATH: /app/data/config.json
     volumes:
-      - ./config.json:/app/config.json
+      - ./data:/app/data
       - ./certs:/certs:ro

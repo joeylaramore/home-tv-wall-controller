@@ -5,25 +5,102 @@ import base64
 import http.server
 import ipaddress
 import json
+import hmac
 import os
 import pathlib
+import re
 import socket
 import ssl
 import sys
 import threading
+import tempfile
+import uuid
 import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
 
 ROOT = pathlib.Path(__file__).resolve().parent
 WEB = ROOT / "web"
-CONFIG_PATH = ROOT / "config.json"
+CONFIG_PATH = pathlib.Path(os.environ.get("ROKU_CONFIG_PATH", str(ROOT / "config.json")))
+CONFIG_LOCK = threading.RLock()
+MAX_CONFIG_BYTES = 256 * 1024
+LOCAL_NETWORKS = tuple(ipaddress.ip_network(value) for value in
+                       ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"))
 TVS = []
+
+
+def local_address(value):
+    address = ipaddress.ip_address(value)
+    return address.is_loopback or any(address in network for network in LOCAL_NETWORKS)
+
+
+def validate_config(payload):
+    """Validate the existing config format; list order is the wall layout."""
+    if not isinstance(payload, dict) or set(payload) != {"tvs"}:
+        raise ValueError('Configuration must contain only a "tvs" list')
+    devices = payload["tvs"]
+    if not isinstance(devices, list) or len(devices) > 100:
+        raise ValueError("Provide a list of no more than 100 TVs")
+    configured, seen_ids, seen_macs = [], set(), set()
+    for index, item in enumerate(devices):
+        if not isinstance(item, dict) or set(item) - {"name", "device_id", "mac", "ip"}:
+            raise ValueError(f"TV {index + 1} has invalid fields")
+        tv = {}
+        for key in ("name", "device_id", "mac", "ip"):
+            value = item.get(key, "")
+            if not isinstance(value, str) or len(value) > 200 or any(ord(c) < 32 for c in value):
+                raise ValueError(f"TV {index + 1}: invalid {key}")
+            tv[key] = value.strip()
+        if not tv["name"] or not (tv["device_id"] or tv["mac"]):
+            raise ValueError(f"TV {index + 1} needs a name and device ID or MAC")
+        if tv["mac"]:
+            if not re.fullmatch(r"[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}", tv["mac"]):
+                raise ValueError(f"TV {index + 1}: invalid MAC address")
+            tv["mac"] = tv["mac"].lower()
+        for key, seen in (("device_id", seen_ids), ("mac", seen_macs)):
+            if tv[key] and tv[key] in seen:
+                raise ValueError(f"Each TV needs a unique {key}")
+            if tv[key]:
+                seen.add(tv[key])
+        if tv["ip"] and not local_address(tv["ip"]):
+            raise ValueError("Cached TV addresses must be private LAN addresses")
+        configured.append(tv)
+    return {"tvs": configured}
+
+
+def atomic_write(path, data):
+    """Replace a file only after its full contents have reached disk."""
+    fd, temporary = tempfile.mkstemp(prefix=".roku-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def save_config(payload):
+    config = validate_config(payload)
+    data = (json.dumps(config, indent=2) + "\n").encode("utf-8")
+    with CONFIG_LOCK:
+        # A failed backup aborts the save. Keep every previous version.
+        backup_dir = CONFIG_PATH.parent / "config-backups"
+        backup_dir.mkdir(mode=0o700, exist_ok=True)
+        previous = CONFIG_PATH.read_bytes()
+        backup = backup_dir / f"config-{uuid.uuid4().hex}.json"
+        atomic_write(backup, previous)
+        atomic_write(CONFIG_PATH, data)
+        TVS[:] = config["tvs"]
+    return backup.name
 
 
 def device_info(ip):
     ipaddress.ip_address(ip)
-    with urllib.request.urlopen(f"http://{ip}:8060/query/device-info", timeout=2) as response:
+    host = f"[{ip}]" if ":" in ip else ip
+    with urllib.request.urlopen(f"http://{host}:8060/query/device-info", timeout=2) as response:
         root = ET.fromstring(response.read(65536))
     return {key: root.findtext(key, "") for key in
             ("device-id", "serial-number", "wifi-mac", "ethernet-mac", "user-device-name", "power-mode")}
@@ -143,8 +220,9 @@ def resolve(tv):
 
 def send_keypress(tv, action, ip):
     try:
+        host = f"[{ip}]" if ":" in ip else ip
         request = urllib.request.Request(
-            f"http://{ip}:8060/keypress/{action}", data=b"", method="POST"
+            f"http://{host}:8060/keypress/{action}", data=b"", method="POST"
         )
         with urllib.request.urlopen(request, timeout=4) as response:
             return {"name": tv["name"], "ok": response.status == 200}
@@ -189,73 +267,104 @@ def command_many(tvs, action):
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    timeout = 10
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(WEB), **kwargs)
 
     def do_GET(self):
+        if not self.allowed_client():
+            return
         if self.path == "/healthz":
             return self.reply(200, {"ok": True})
         if not self.authorized():
             return
+        if self.path == "/api/backup":
+            try:
+                with CONFIG_LOCK:
+                    config = validate_config(json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
+                return self.reply(200, config, attachment="roku-wall-config.json")
+            except (OSError, ValueError) as exc:
+                return self.reply(500, {"error": str(exc)})
         if self.path == "/api/discover":
             try:
                 return self.reply(200, list(discover().values()))
             except Exception as exc:
                 return self.reply(500, {"error": str(exc)})
         if self.path == "/api/tvs":
-            return self.reply(200, [{"name": tv["name"], "device_id": tv.get("device_id", ""), "mac": tv.get("mac", ""), "ip": tv.get("ip", ""), "paired": bool(tv.get("device_id") or tv.get("mac"))} for tv in TVS])
+            with CONFIG_LOCK:
+                devices = [dict(tv, paired=bool(tv.get("device_id") or tv.get("mac"))) for tv in TVS]
+            return self.reply(200, devices)
         return super().do_GET()
 
+    def do_HEAD(self):
+        if self.allowed_client() and self.authorized():
+            super().do_HEAD()
+
     def do_POST(self):
-        if not self.authorized():
+        if not self.allowed_client() or not self.authorized():
             return
-        parts = self.path.split("/")
-        if self.path == "/api/configure":
-            length = int(self.headers.get("Content-Length", "0"))
-            payload = json.loads(self.rfile.read(length))
-            devices = payload.get("tvs", [])
-            if not isinstance(devices, list) or not devices or len(devices) > 100:
-                return self.reply(400, {"error": "Provide between 1 and 100 TVs"})
-            seen = set()
-            configured = []
-            for index, item in enumerate(devices):
-                device_id = str(item.get("device_id", "")).strip()
-                if not device_id or device_id in seen:
-                    return self.reply(400, {"error": "Each TV needs a unique discovered device ID"})
-                seen.add(device_id)
-                configured.append({"name": str(item.get("name") or f"TV {index + 1}").strip(), "device_id": device_id, "mac": "", "ip": str(item.get("ip", "")).strip()})
-            CONFIG_PATH.write_text(json.dumps({"tvs": configured}, indent=2) + "\n")
-            TVS[:] = configured
-            return self.reply(200, {"ok": True, "count": len(TVS)})
-        if len(parts) != 4 or parts[1] != "api" or parts[2] not in ("all",) and not parts[2].isdigit() or parts[3] not in ("on", "off"):
-            return self.reply(404, {"error": "Unknown command"})
-        if parts[2] != "all" and (not parts[2].isdigit() or int(parts[2]) >= len(TVS)):
-            return self.reply(404, {"error": "Unknown TV"})
         origin = self.headers.get("Origin")
         host = self.headers.get("Host")
-        if origin and origin not in (f"http://{host}", f"https://{host}"):
+        if (origin and origin not in (f"http://{host}", f"https://{host}")) or self.headers.get("Sec-Fetch-Site") == "cross-site":
             return self.reply(403, {"error": "Origin rejected"})
-        targets = TVS if parts[2] == "all" else [TVS[int(parts[2])]]
+        parts = self.path.split("/")
+        if self.path in ("/api/configure", "/api/restore"):
+            if self.headers.get_content_type() != "application/json":
+                return self.reply(415, {"error": "Use application/json"})
+            try:
+                if self.headers.get("Transfer-Encoding"):
+                    raise ValueError("Transfer-Encoding is unsupported")
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= MAX_CONFIG_BYTES:
+                    raise ValueError("Configuration must be between 1 and 262144 bytes")
+                payload = json.loads(self.rfile.read(length))
+                backup = save_config(payload)
+            except (ValueError, UnicodeError, RecursionError) as exc:
+                return self.reply(400, {"error": str(exc)})
+            except OSError:
+                return self.reply(500, {"error": "Could not save configuration; previous settings remain active"})
+            return self.reply(200, {"ok": True, "count": len(TVS), "previous_backup": backup})
+        if (len(parts) != 4 or parts[1] != "api" or
+                (parts[2] != "all" and not re.fullmatch(r"[0-9]{1,3}", parts[2])) or
+                parts[3] not in ("on", "off")):
+            return self.reply(404, {"error": "Unknown command"})
+        with CONFIG_LOCK:
+            if parts[2] != "all" and int(parts[2]) >= len(TVS):
+                return self.reply(404, {"error": "Unknown TV"})
+            targets = list(TVS) if parts[2] == "all" else [TVS[int(parts[2])]]
         action = "PowerOn" if parts[3] == "on" else "PowerOff"
         result = command_many(targets, action) if parts[2] == "all" else [command(targets[0], action)]
         return self.reply(200, result)
 
-    def reply(self, status, data):
+    def reply(self, status, data, attachment=None):
         body = json.dumps(data).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Cache-Control", "no-store")
+        if attachment:
+            self.send_header("Content-Disposition", f'attachment; filename="{attachment}"')
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def allowed_client(self):
+        address = ipaddress.ip_address(self.client_address[0])
+        if address.is_loopback or any(address in network for network in self.server.allowed_networks):
+            return True
+        self.reply(403, {"error": "Access is limited to the LAN and private VPN"})
+        return False
 
     def authorized(self):
         password = os.environ.get("ROKU_WALL_PASSWORD")
         if not password:
-            return True
-        import hmac
+            if ipaddress.ip_address(self.client_address[0]).is_loopback:
+                return True
+            self.reply(403, {"error": "Network access requires ROKU_WALL_PASSWORD"})
+            return False
         expected = "Basic " + base64.b64encode(("roku:" + password).encode()).decode()
-        if hmac.compare_digest(self.headers.get("Authorization", ""), expected):
+        if hmac.compare_digest(self.headers.get("Authorization", "").encode(), expected.encode()):
             return True
         self.send_response(401)
         self.send_header("WWW-Authenticate", 'Basic realm="Roku Wall"')
@@ -278,15 +387,20 @@ if __name__ == "__main__":
         sys.exit(0)
     if not CONFIG_PATH.exists():
         sys.exit("Copy config.example.json to config.json and set four TV identities")
-    TVS = json.loads(CONFIG_PATH.read_text())["tvs"]
-    if len(TVS) > 100:
-        sys.exit("Configure no more than 100 TVs in config.json")
-    for tv in TVS:
-        if tv.get("ip") and not ipaddress.ip_address(tv["ip"]).is_private:
-            sys.exit("Optional cached IP must be a private LAN address")
+    try:
+        TVS = validate_config(json.loads(CONFIG_PATH.read_text(encoding="utf-8")))["tvs"]
+        allowed_networks = LOCAL_NETWORKS + tuple(ipaddress.ip_network(value.strip()) for value in
+            os.environ.get("ROKU_ALLOWED_CIDRS", "").split(",") if value.strip())
+    except ValueError as exc:
+        sys.exit(str(exc))
+    if (args.host not in ("127.0.0.1", "localhost", "::1") and
+            not os.environ.get("ROKU_WALL_PASSWORD") and
+            os.environ.get("ROKU_ALLOW_UNAUTHENTICATED_NETWORK") != "1"):
+        sys.exit("Network access requires ROKU_WALL_PASSWORD")
     if args.host not in ("127.0.0.1", "localhost", "::1") and not (args.cert and args.key):
         sys.exit("LAN access requires --cert and --key. See README.md")
     server = http.server.ThreadingHTTPServer((args.host, args.port), Handler)
+    server.allowed_networks = allowed_networks
     if args.cert and args.key:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(args.cert, args.key)
