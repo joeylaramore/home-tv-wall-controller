@@ -282,12 +282,44 @@ def send_launch(tv, app_id, ip):
         return {"name": tv["name"], "ok": False, "error": str(exc)}
 
 
+def send_launch_content(tv, app_id, content_id, media_type, ip):
+    try:
+        host = f"[{ip}]" if ":" in ip else ip
+        params = urllib.parse.urlencode({"contentID": content_id, "MediaType": media_type})
+        request = urllib.request.Request(
+            f"http://{host}:8060/launch/{urllib.parse.quote(app_id, safe='')}?{params}", data=b"", method="POST"
+        )
+        with urllib.request.urlopen(request, timeout=4) as response:
+            return {"name": tv["name"], "ok": response.status == 200}
+    except Exception as exc:
+        return {"name": tv["name"], "ok": False, "error": str(exc)}
+
+
 def query_apps(ip):
     host = f"[{ip}]" if ":" in ip else ip
     with urllib.request.urlopen(f"http://{host}:8060/query/apps", timeout=4) as response:
         root = ET.fromstring(response.read(65536))
     return [{"id": item.attrib.get("id", ""), "name": item.text or ""}
             for item in root.findall("app") if item.attrib.get("id") and item.text]
+
+
+def youtube_live_games():
+    api_key = os.environ.get("YOUTUBE_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("YOUTUBE_API_KEY is not configured")
+    query = urllib.parse.urlencode({
+        "part": "snippet", "q": "NFL Sunday Ticket", "type": "video",
+        "eventType": "live", "order": "relevance", "maxResults": "25", "key": api_key,
+    })
+    with urllib.request.urlopen(f"https://www.googleapis.com/youtube/v3/search?{query}", timeout=8) as response:
+        payload = json.loads(response.read(256 * 1024))
+    games = []
+    for item in payload.get("items", []):
+        video_id = item.get("id", {}).get("videoId")
+        snippet = item.get("snippet", {})
+        if video_id and snippet.get("title"):
+            games.append({"id": video_id, "title": snippet["title"], "channel": snippet.get("channelTitle", "")})
+    return games
 
 
 def command(tv, action):
@@ -391,6 +423,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             with CONFIG_LOCK:
                 devices = [dict(tv, paired=bool(tv.get("device_id") or tv.get("mac"))) for tv in TVS]
             return self.reply(200, devices)
+        if self.path == "/api/youtube/live-games":
+            try:
+                return self.reply(200, youtube_live_games())
+            except Exception as exc:
+                return self.reply(503, {"error": str(exc)})
         if re.fullmatch(r"/api/apps/[0-9]{1,3}", self.path):
             index = int(self.path.rsplit("/", 1)[1])
             with CONFIG_LOCK:
@@ -476,6 +513,25 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     return self.reply(404, {"error": "Unknown TV"})
                 tv = TVS[index]
             return self.reply(200, [run_action(tv, {"command": "launch", "value": app_id})])
+        content_match = re.fullmatch(r"/api/([0-9]{1,3})/launch-content", self.path)
+        if content_match:
+            index = int(content_match.group(1))
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length)) if 0 < length <= 2048 else {}
+                app_id, content_id = payload.get("app_id", "837"), payload.get("content_id", "")
+                media_type = payload.get("media_type", "shortFormVideo")
+                if not re.fullmatch(r"[A-Za-z0-9._:-]+", app_id) or not re.fullmatch(r"[A-Za-z0-9_-]{6,20}", content_id):
+                    raise ValueError("Invalid content link")
+                if not re.fullmatch(r"[A-Za-z0-9]+", media_type):
+                    raise ValueError("Invalid media type")
+            except (ValueError, TypeError, json.JSONDecodeError):
+                return self.reply(400, {"error": "Invalid content link"})
+            with CONFIG_LOCK:
+                if index >= len(TVS):
+                    return self.reply(404, {"error": "Unknown TV"})
+                tv = TVS[index]
+            return self.reply(200, [send_launch_content(tv, app_id, content_id, media_type, resolve(tv))])
         key_match = re.fullmatch(r"/api/([0-9]{1,3})/keypress/([A-Za-z0-9]+)", self.path)
         if key_match:
             index, key = int(key_match.group(1)), key_match.group(2)

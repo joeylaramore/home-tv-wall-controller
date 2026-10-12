@@ -8,6 +8,7 @@ let scenes = [];
 let editing = false;
 let draggedIndex = null;
 let remoteIndex = null;
+let liveGames = [];
 
 function openRemote(index) {
   remoteIndex = index; document.querySelector('#remote-title').textContent = `${tvs[index].name} remote`; document.querySelector('#remote-panel').hidden = false;
@@ -60,6 +61,17 @@ async function loadScenes() {
     const response = await fetch('/api/scenes', {cache:'no-store'}); if (!response.ok) throw Error(); scenes = await response.json(); container.replaceChildren();
     scenes.forEach((scene, index) => { const button = document.createElement('button'); button.textContent = scene.name; button.dataset.scene = index; container.append(button); }); container.hidden = !scenes.length;
   } catch (_) { container.hidden = true; }
+}
+
+function renderGames() {
+  const container = document.querySelector('#games'); container.replaceChildren();
+  tvs.forEach((tv, index) => {
+    const row = document.createElement('label'); row.className = 'game-row'; const name = document.createElement('span'); name.textContent = tv.name;
+    const select = document.createElement('select'); select.dataset.gameTarget = index; select.setAttribute('aria-label', `Live game for ${tv.name}`);
+    liveGames.forEach((game, gameIndex) => { const option = document.createElement('option'); option.value = game.id; option.textContent = game.title; option.selected = gameIndex === index % liveGames.length; select.append(option); });
+    row.append(name, select); container.append(row);
+  });
+  container.hidden = !liveGames.length; document.querySelector('#play-games').hidden = !liveGames.length;
 }
 
 async function load() {
@@ -137,6 +149,18 @@ restoreFile.addEventListener('change', async () => {
 });
 
 document.addEventListener('click', async event => {
+  if (event.target.closest('#find-games')) {
+    const button = event.target.closest('#find-games'); button.disabled = true; message.textContent = 'Looking for live games…';
+    try { const response = await fetch('/api/youtube/live-games', {cache:'no-store'}); const result = await response.json(); if (!response.ok) throw Error(result.error || 'Live-game lookup failed.'); liveGames = result; renderGames(); message.textContent = liveGames.length ? `${liveGames.length} live games found. Choose one for each TV.` : 'No live games found.'; }
+    catch (error) { message.textContent = error.message || 'Live-game lookup failed.'; } finally { button.disabled = false; }
+    return;
+  }
+  if (event.target.closest('#play-games')) {
+    const selects = [...document.querySelectorAll('select[data-game-target]')]; document.querySelectorAll('#game-picker button, #game-picker select').forEach(item => { item.disabled = true; }); message.textContent = 'Launching selected games…';
+    try { const results = await Promise.all(selects.map(select => fetch(`/api/${select.dataset.gameTarget}/launch-content`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({app_id:'837', content_id:select.value, media_type:'shortFormVideo'})}).then(async response => { const value = await response.json(); if (!response.ok) throw Error(value.error || 'Launch failed.'); return value[0]; }))); const failed = results.filter(result => !result.ok).map(result => result.name); message.textContent = failed.length ? `Could not reach: ${failed.join(', ')}.` : 'Selected games launched.'; }
+    catch (error) { message.textContent = error.message || 'Could not launch selected games.'; } finally { document.querySelectorAll('#game-picker button, #game-picker select').forEach(item => { item.disabled = false; }); }
+    return;
+  }
   if (!editing && event.target.closest('.tile') && !event.target.closest('button, select, input')) { openRemote(Number(event.target.closest('.tile').dataset.index)); return; }
   const remote = event.target.closest('button[data-remote]');
   if (remote && remoteIndex !== null) {
