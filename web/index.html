@@ -3,7 +3,7 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#101827"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml"><title>Home TV Wall Controller</title><link rel="stylesheet" href="/style.css"></head>
 <body><main>
 <section class="page" id="home-page">
-<header><div><span class="eyebrow">HOME TV WALL CONTROLLER</span><h1>TV Wall</h1><p class="subtitle">Choose a mode, then fine-tune any screen.</p><label class="household-picker">Household<select id="household-select" aria-label="Household"><option>Home</option></select></label></div><span class="mark" aria-hidden="true">TV</span></header>
+<header><div><span class="eyebrow">HOME TV WALL CONTROLLER</span><h1>TV Wall</h1><p class="subtitle">Choose a mode, then fine-tune any screen.</p><label class="household-picker">Household<select id="household-select" aria-label="Household"><option>Home</option><option>Guest House</option><option>Vacation House</option></select></label></div><span class="mark" aria-hidden="true">TV</span></header>
 <section class="quick-actions" aria-label="Quick actions"><button class="on" data-target="all" data-action="on">Turn all TVs on</button><button class="off" data-target="all" data-action="off">Turn all TVs off</button></section>
 <section class="mode-section" aria-labelledby="modes-title"><div class="section-heading"><div><span class="eyebrow">ONE TAP MODES</span><h2 id="modes-title">What do you want to do?</h2></div></div><section class="scenes" id="scenes" aria-label="Scenes" hidden></section></section>
 <section class="game-picker" id="game-picker" aria-label="Sunday Ticket games"><div class="section-heading"><div><h2>Sunday Ticket</h2><p>Find live coverage and assign a different game to each TV.</p></div></div><button id="find-games">Find live games</button><div id="games" hidden></div><button id="play-games" class="on" hidden>Play selected games</button></section>
@@ -14,6 +14,7 @@
 <p class="message" id="message" role="status" aria-live="polite">Connect to your local controller to begin.</p>
 <section class="page devices-page" id="devices-page" hidden aria-labelledby="devices-title"><div class="section-heading"><div><span class="eyebrow">LOCAL DEVICES</span><h2 id="devices-title">Speakers and LG TVs</h2><p>Discover devices on your home network. Controls stay separate from the Roku wall.</p></div></div><button class="on" id="discover-devices">Discover Sonos and LG devices</button><div id="device-results"></div></section>
 <nav class="bottom-nav" aria-label="Main navigation"><button class="active" data-page="home-page">Wall</button><button data-page="devices-page">Devices</button><button data-page="settings-page">Settings</button></nav></main><script src="/app.js" defer></script></body></html>
+
 
 
 
