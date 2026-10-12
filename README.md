@@ -16,17 +16,13 @@ Run `python server.py` and open `http://localhost:8765`. Test one TV's Off and O
 
 ## Install on a phone
 
-The simplest setup uses the HTTPS hostname from your trusted LAN or WireGuard connection:
+1. Put the phone on the same home Wi-Fi as the controller.
+2. Open the controller address in Safari or Chrome. Use the address shown by your installation; for the example deployment, it is `https://roku.jlaramore.com`.
+3. Add it to the home screen:
+   - **iPhone/iPad:** Share → **Add to Home Screen**.
+   - **Android:** ⋮ → **Install app** or **Add to Home screen**.
 
-1. Connect the phone to home Wi-Fi or to the private WireGuard VPN.
-2. Open `https://roku.jlaramore.com` in the browser.
-3. Install it from the browser menu:
-   - **iPhone/iPad:** Safari → Share → **Add to Home Screen**.
-   - **Android:** Chrome → ⋮ → **Install app** or **Add to Home screen**.
-
-The site already includes the web manifest and service worker required for PWA installation. A trusted HTTPS certificate is required; use a publicly trusted certificate for the hostname or a local CA trusted by every phone. Do not install the app from the public redirect. The phone must use the home router's DNS service so the controller hostname resolves to its private WireGuard address. Devices using a manually configured public DNS resolver will resolve the public address and be denied. Away from home, connect the phone's WireGuard profile before opening the app.
-
-For a standalone controller without a DNS name, generate a trusted local certificate with `mkcert` for its LAN address and trust the mkcert root CA on each phone. Keep the private key secure and allow TCP 8765 only on the private network.
+To use it away from home, connect the phone to the controller's private WireGuard VPN first, then open the same address. The public GitHub address is for the project instructions; it is not the controller.
 
 ## Linux server with Docker Compose
 
