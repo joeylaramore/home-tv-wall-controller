@@ -25,6 +25,12 @@ try:
 except ImportError:  # Apple TV support is optional for source-only installs.
     pyatv = None
     FileStorage = None
+try:
+    import soco
+    from pywebostv.connection import WebOSClient
+except ImportError:
+    soco = None
+    WebOSClient = None
 
 ROOT = pathlib.Path(__file__).resolve().parent
 WEB = ROOT / "web"
@@ -118,6 +124,32 @@ def apple_tv_pair(address, pin=None):
             APPLE_TV_PAIRINGS.pop(key, None)
         return {"ok": paired}
     return asyncio.run(run())
+
+
+def discover_other_devices():
+    result = {"sonos": [], "lg": []}
+    if soco is not None:
+        for speaker in sorted(soco.discover(timeout=3) or set(), key=lambda item: item.player_name):
+            result["sonos"].append({"name": speaker.player_name, "address": speaker.ip_address,
+                                    "model": speaker.get_sonos_info().get("model", "Sonos")})
+    if WebOSClient is not None:
+        try:
+            result["lg"] = [{"name": f"LG TV ({address})", "address": address}
+                            for address in sorted(WebOSClient.discover())]
+        except Exception:
+            pass
+    return result
+
+
+def sonos_command(address, command, value=None):
+    if soco is None:
+        raise RuntimeError("Sonos support is not installed")
+    speaker = soco.SoCo(address)
+    if command == "volume": speaker.volume = max(0, min(100, int(value)))
+    elif command == "mute": speaker.mute = bool(value)
+    elif command in {"play", "pause", "stop", "next", "previous"}: getattr(speaker, command)()
+    else: raise ValueError("Unsupported Sonos command")
+    return {"ok": True, "name": speaker.player_name}
 
 
 def validate_config(payload):
@@ -519,6 +551,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self.reply(200, apple_tv_scan())
             except Exception as exc:
                 return self.reply(503, {"error": str(exc)})
+        if self.path == "/api/devices/discover":
+            try:
+                return self.reply(200, discover_other_devices())
+            except Exception as exc:
+                return self.reply(503, {"error": str(exc)})
         if re.fullmatch(r"/api/apps/[0-9]{1,3}", self.path):
             index = int(self.path.rsplit("/", 1)[1])
             with CONFIG_LOCK:
@@ -546,6 +583,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if (origin and origin not in (f"http://{host}", f"https://{host}")) or self.headers.get("Sec-Fetch-Site") == "cross-site":
             return self.reply(403, {"error": "Origin rejected"})
         parts = self.path.split("/")
+        sonos_match = re.fullmatch(r"/api/devices/sonos/(play|pause|stop|next|previous|mute|volume)", self.path)
+        if sonos_match:
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length)) if 0 < length <= 2048 else {}
+                address = payload.get("address", "")
+                if not isinstance(address, str) or not local_address(address): raise ValueError("Speaker address must be private")
+                value = payload.get("value") if sonos_match.group(1) in {"volume", "mute"} else None
+                return self.reply(200, sonos_command(address, sonos_match.group(1), value))
+            except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                return self.reply(400, {"error": str(exc)})
+            except Exception as exc:
+                return self.reply(502, {"error": str(exc)})
         apple_pair_match = re.fullmatch(r"/api/apple-tv/pair/(start|pin)", self.path)
         if apple_pair_match:
             try:
