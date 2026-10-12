@@ -38,6 +38,8 @@ Create `data/`, copy `config.example.json` to `data/config.json` and `.env.examp
 
 `config.json`, `.env`, and certificate files are excluded from Git. The browser service worker caches only the interface; TV commands always go to the controller. A public release would need guided discovery/pairing and stronger device authentication before distribution.
 
+For a private LAN/VPN deployment behind the Nginx allowlist, set `ROKU_WALL_PASSWORD=` and `ROKU_ALLOW_UNAUTHENTICATED_NETWORK=1`. Keep port 8765 unreachable from the public internet and use the Nginx example to enforce the trusted source networks. If you do not have a network allowlist, keep the strong password from `.env.example` and leave the flag at `0`.
+
 ## Back up and restore
 
 **Backup Configuration** downloads the saved `config.json`, including device IDs, MAC addresses, names, cached addresses, and the TV list order used for layout. Save layout edits before downloading. **Restore Configuration** selects a JSON backup and asks before replacing settings. The server validates the entire file before writing; malformed files, duplicate identities, public TV addresses, and files larger than 256 KB are rejected. Empty TV lists are supported for a fresh setup.
@@ -48,7 +50,7 @@ Direct Python installations still use the repository's `config.json`. Set `ROKU_
 
 ## LAN and WireGuard access
 
-The server defaults to loopback on port 8765. Network listeners require HTTPS. With a password configured, the app also enforces HTTP Basic authentication. A passwordless deployment is supported only when `ROKU_ALLOW_UNAUTHENTICATED_NETWORK=1` is set and a reverse proxy/firewall strictly limits access to trusted networks; the application still rejects direct non-loopback requests without a password. Network ranges configured in `ROKU_ALLOWED_CIDRS` are checked by the application, but a reverse proxy must enforce the original client address when the app is proxied. Forwarded headers are not trusted by the application.
+Direct Python invocation defaults to loopback on port 8765; the Docker Compose example uses host networking so Roku discovery can cross the local network. Network listeners require HTTPS. With a password configured, the app also enforces HTTP Basic authentication. A passwordless deployment is supported only when `ROKU_ALLOW_UNAUTHENTICATED_NETWORK=1` is set and a reverse proxy/firewall strictly limits access to trusted networks; the application still rejects direct non-loopback requests without a password. The application always allows private address ranges and `ROKU_ALLOWED_CIDRS` can add trusted ranges; it does not replace those built-in private ranges. A reverse proxy must enforce the original client address when the app is proxied. Forwarded headers are not trusted by the application.
 
 Application filtering alone cannot block public traffic forwarded by a local reverse proxy or tunnel: the server sees the proxy's local address. Before changing the GL-MT2500, inspect the existing public entry point:
 
