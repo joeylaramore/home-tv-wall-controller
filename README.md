@@ -30,6 +30,8 @@ A 2x2 Apple TV wall scene can switch every TV to the processor input:
 
 Separate TV actions can be combined in one scene, but selecting a different live game automatically on each YouTube TV screen requires deep-link support from the installed service.
 
+The 2x2 Apple TV scene mutes all TV speakers. The companion **2x2 Apple TV Wall - TV 1 Audio** scene unmutes only the first TV for ARC audio. Open that TV's remote panel to adjust volume with Vol + and Vol -. Change the scene target from `0` to another TV index when a different TV feeds the soundbar.
+
 ## Install on a phone
 
 1. Put the phone on the same home Wi-Fi as the controller.

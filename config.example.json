@@ -10,7 +10,16 @@
     {
       "name": "2x2 Apple TV Wall",
       "actions": [
-        {"target": "all", "command": "keypress", "value": "InputHDMI4"}
+        {"target": "all", "command": "keypress", "value": "InputHDMI4"},
+        {"target": "all", "command": "keypress", "value": "VolumeMute"}
+      ]
+    },
+    {
+      "name": "2x2 Apple TV Wall - TV 1 Audio",
+      "actions": [
+        {"target": "all", "command": "keypress", "value": "InputHDMI4"},
+        {"target": "all", "command": "keypress", "value": "VolumeMute"},
+        {"target": "0", "command": "keypress", "value": "VolumeMute"}
       ]
     }
   ]
