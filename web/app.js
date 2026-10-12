@@ -68,7 +68,8 @@ function renderGames() {
   tvs.forEach((tv, index) => {
     const row = document.createElement('label'); row.className = 'game-row'; const name = document.createElement('span'); name.textContent = tv.name;
     const select = document.createElement('select'); select.dataset.gameTarget = index; select.setAttribute('aria-label', `Live game for ${tv.name}`);
-    liveGames.forEach((game, gameIndex) => { const option = document.createElement('option'); option.value = game.id; option.textContent = game.title; option.selected = gameIndex === index % liveGames.length; select.append(option); });
+    if (index >= liveGames.length) { const option = document.createElement('option'); option.value = ''; option.textContent = 'No unique game available'; select.append(option); select.disabled = true; }
+    liveGames.forEach((game, gameIndex) => { const option = document.createElement('option'); option.value = game.id; option.textContent = game.title; option.selected = gameIndex === index; select.append(option); });
     row.append(name, select); container.append(row);
   });
   container.hidden = !liveGames.length; document.querySelector('#play-games').hidden = !liveGames.length;
@@ -157,7 +158,7 @@ document.addEventListener('click', async event => {
   }
   if (event.target.closest('#play-games')) {
     const selects = [...document.querySelectorAll('select[data-game-target]')]; document.querySelectorAll('#game-picker button, #game-picker select').forEach(item => { item.disabled = true; }); message.textContent = 'Launching selected games…';
-    try { const results = await Promise.all(selects.map(select => fetch(`/api/${select.dataset.gameTarget}/launch-content`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({app_id:'837', content_id:select.value, media_type:'shortFormVideo'})}).then(async response => { const value = await response.json(); if (!response.ok) throw Error(value.error || 'Launch failed.'); return value[0]; }))); const failed = results.filter(result => !result.ok).map(result => result.name); message.textContent = failed.length ? `Could not reach: ${failed.join(', ')}.` : 'Selected games launched.'; }
+    try { const chosen = selects.filter(select => select.value); if (new Set(chosen.map(select => select.value)).size !== chosen.length) throw Error('Choose a different game for each TV.'); const results = await Promise.all(chosen.map(select => fetch(`/api/${select.dataset.gameTarget}/launch-content`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({app_id:'837', content_id:select.value, media_type:'shortFormVideo'})}).then(async response => { const value = await response.json(); if (!response.ok) throw Error(value.error || 'Launch failed.'); return value[0]; }))); const failed = results.filter(result => !result.ok).map(result => result.name); message.textContent = failed.length ? `Could not reach: ${failed.join(', ')}.` : `${results.length} different games launched.`; }
     catch (error) { message.textContent = error.message || 'Could not launch selected games.'; } finally { document.querySelectorAll('#game-picker button, #game-picker select').forEach(item => { item.disabled = false; }); }
     return;
   }

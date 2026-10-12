@@ -307,18 +307,25 @@ def youtube_live_games():
     api_key = os.environ.get("YOUTUBE_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("YOUTUBE_API_KEY is not configured")
-    query = urllib.parse.urlencode({
-        "part": "snippet", "q": "NFL Sunday Ticket", "type": "video",
-        "eventType": "live", "order": "relevance", "maxResults": "25", "key": api_key,
-    })
-    with urllib.request.urlopen(f"https://www.googleapis.com/youtube/v3/search?{query}", timeout=8) as response:
-        payload = json.loads(response.read(256 * 1024))
     games = []
-    for item in payload.get("items", []):
-        video_id = item.get("id", {}).get("videoId")
-        snippet = item.get("snippet", {})
-        if video_id and snippet.get("title"):
-            games.append({"id": video_id, "title": snippet["title"], "channel": snippet.get("channelTitle", "")})
+    seen = set()
+    # Sunday Ticket listings may be absent from public search. Broaden the
+    # search to general NFL/football coverage before reporting no results.
+    for term in ("NFL Sunday Ticket", "NFL live", "football live"):
+        query = urllib.parse.urlencode({
+            "part": "snippet", "q": term, "type": "video", "eventType": "live",
+            "order": "relevance", "maxResults": "25", "key": api_key,
+        })
+        with urllib.request.urlopen(f"https://www.googleapis.com/youtube/v3/search?{query}", timeout=8) as response:
+            payload = json.loads(response.read(256 * 1024))
+        for item in payload.get("items", []):
+            video_id = item.get("id", {}).get("videoId")
+            snippet = item.get("snippet", {})
+            if video_id and video_id not in seen and snippet.get("title"):
+                seen.add(video_id)
+                games.append({"id": video_id, "title": snippet["title"], "channel": snippet.get("channelTitle", "")})
+        if games:
+            break
     return games
 
 

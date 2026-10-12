@@ -14,7 +14,7 @@ On the computer that will run the controller, run `python server.py --discover`.
 
 Run `python server.py` and open `http://localhost:8765`. Test one TV's Off and On before using group controls. Roku explicitly documents `PowerOff`; confirm `PowerOn` works on your models. The app reports failures per TV.
 
-Set `YOUTUBE_API_KEY` in `.env` to enable **Find live Sunday Ticket games**. The controller searches public live YouTube broadcasts, assigns different results to the TVs by default, and launches the selected YouTube video IDs. YouTube or YouTube TV subscription-only games may not appear in the public search results, so the picker can still require manual selection.
+Set `YOUTUBE_API_KEY` in `.env` to enable **Find live Sunday Ticket games**. The controller searches public live YouTube broadcasts, broadens the search to NFL and football coverage when Sunday Ticket has no public result, assigns a different result to each TV, and launches the selected YouTube video IDs. It will not duplicate a game; TVs without a unique result are left untouched. YouTube or YouTube TV subscription-only games may not appear in public search results.
 
 Each TV tile can select HDMI 1-4 or launch an installed Roku app. Clicking a tile opens a compact remote with navigation, playback, volume, mute, and input controls. Add saved scenes to `config.json` with an action target of `all` or a TV index. A `target` of `0` addresses the first TV, `1` the second, and so on. Select the HDMI port connected to the video-wall processor; the ARC port is a TV-specific HDMI port and should be configured according to the TV model.
 
