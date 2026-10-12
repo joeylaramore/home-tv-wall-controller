@@ -14,6 +14,22 @@ On the computer that will run the controller, run `python server.py --discover`.
 
 Run `python server.py` and open `http://localhost:8765`. Test one TV's Off and On before using group controls. Roku explicitly documents `PowerOff`; confirm `PowerOn` works on your models. The app reports failures per TV.
 
+Each TV tile can select HDMI 1-4 or launch an installed Roku app. Clicking a tile opens a compact remote with navigation, playback, volume, mute, and input controls. Add saved scenes to `config.json` with an action target of `all` or a TV index. A `target` of `0` addresses the first TV, `1` the second, and so on. Select the HDMI port connected to the video-wall processor; the ARC port is a TV-specific HDMI port and should be configured according to the TV model.
+
+For example, this scene opens YouTube TV on every screen:
+
+```json
+{"name":"NFL Sunday Ticket","actions":[{"target":"all","command":"launch_name","value":"YouTube TV"}]}
+```
+
+A 2x2 Apple TV wall scene can switch every TV to the processor input:
+
+```json
+{"name":"2x2 Game Wall","actions":[{"target":"all","command":"keypress","value":"InputHDMI1"}]}
+```
+
+Separate TV actions can be combined in one scene, but selecting a different live game automatically on each YouTube TV screen requires deep-link support from the installed service.
+
 ## Install on a phone
 
 1. Put the phone on the same home Wi-Fi as the controller.

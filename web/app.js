@@ -4,8 +4,14 @@ const discovered = document.querySelector('#discovered');
 const message = document.querySelector('#message');
 let tvs = [];
 let found = [];
+let scenes = [];
 let editing = false;
 let draggedIndex = null;
+let remoteIndex = null;
+
+function openRemote(index) {
+  remoteIndex = index; document.querySelector('#remote-title').textContent = `${tvs[index].name} remote`; document.querySelector('#remote-panel').hidden = false;
+}
 
 function render() {
   grid.replaceChildren();
@@ -19,7 +25,13 @@ function render() {
       const button = document.createElement('button'); button.textContent = label; button.className = action;
       button.dataset.target = index; button.dataset.action = action; button.disabled = editing; actions.append(button);
     }
-    tile.append(heading, actions); grid.append(tile);
+    const inputs = document.createElement('div'); inputs.className = 'input-buttons';
+    for (let input = 1; input <= 4; input++) { const button = document.createElement('button'); button.textContent = `HDMI ${input}`; button.dataset.target = index; button.dataset.input = `InputHDMI${input}`; button.disabled = editing; inputs.append(button); }
+    const apps = document.createElement('div'); apps.className = 'app-controls';
+    const select = document.createElement('select'); select.className = 'app-select'; select.setAttribute('aria-label', `App for ${tv.name}`); select.disabled = editing;
+    const placeholder = document.createElement('option'); placeholder.textContent = 'Loading apps…'; placeholder.value = ''; select.append(placeholder);
+    const launch = document.createElement('button'); launch.textContent = 'Open app'; launch.className = 'launch-app'; launch.dataset.target = index; launch.disabled = editing;
+    apps.append(select, launch); tile.append(heading, actions, inputs, apps); grid.append(tile); loadApps(index, select);
     if (editing) {
       tile.addEventListener('dragstart', () => { draggedIndex = index; tile.classList.add('dragging'); });
       tile.addEventListener('dragend', () => tile.classList.remove('dragging'));
@@ -31,11 +43,28 @@ function render() {
   document.querySelector('#edit-layout').hidden = tvs.length === 0 || editing;
   document.querySelector('#save-layout').hidden = !editing;
   document.querySelectorAll('.group button').forEach(button => { button.disabled = editing; });
+  document.querySelectorAll('#scenes button').forEach(button => { button.disabled = editing; });
+}
+
+async function loadApps(index, select) {
+  try {
+    const response = await fetch(`/api/apps/${index}`, {cache:'no-store'}); if (!response.ok) throw Error();
+    const apps = await response.json(); select.replaceChildren(); apps.sort((a, b) => a.name.localeCompare(b.name)).forEach(app => { const option = document.createElement('option'); option.value = app.id; option.textContent = app.name; select.append(option); });
+    if (!apps.length) { const option = document.createElement('option'); option.textContent = 'No apps found'; select.append(option); }
+  } catch (_) { select.replaceChildren(); const option = document.createElement('option'); option.textContent = 'Apps unavailable'; select.append(option); }
+}
+
+async function loadScenes() {
+  const container = document.querySelector('#scenes');
+  try {
+    const response = await fetch('/api/scenes', {cache:'no-store'}); if (!response.ok) throw Error(); scenes = await response.json(); container.replaceChildren();
+    scenes.forEach((scene, index) => { const button = document.createElement('button'); button.textContent = scene.name; button.dataset.scene = index; container.append(button); }); container.hidden = !scenes.length;
+  } catch (_) { container.hidden = true; }
 }
 
 async function load() {
   try {
-    const response = await fetch('/api/tvs', {cache:'no-store'}); if (!response.ok) throw Error(); tvs = await response.json(); render();
+    const response = await fetch('/api/tvs', {cache:'no-store'}); if (!response.ok) throw Error(); tvs = await response.json(); render(); loadScenes();
     message.textContent = tvs.length ? 'Ready. Controls are sent over your local network.' : 'Discover your Roku TVs to get started.';
     return true;
   } catch (_) { message.textContent = 'Controller unavailable. Reconnect to your local network and reload.'; return false; }
@@ -108,6 +137,32 @@ restoreFile.addEventListener('change', async () => {
 });
 
 document.addEventListener('click', async event => {
+  if (!editing && event.target.closest('.tile') && !event.target.closest('button, select, input')) { openRemote(Number(event.target.closest('.tile').dataset.index)); return; }
+  const remote = event.target.closest('button[data-remote]');
+  if (remote && remoteIndex !== null) {
+    const buttons = [...document.querySelectorAll('#remote-panel button')]; buttons.forEach(item => item.disabled = true); message.textContent = `Sending ${remote.textContent}…`;
+    try { const response = await fetch(`/api/${remoteIndex}/keypress/${remote.dataset.remote}`, {method:'POST'}); if (!response.ok) throw Error(); const result = await response.json(); message.textContent = result[0].ok ? `${result[0].name}: command sent.` : `Could not reach ${result[0].name}.`; }
+    catch (_) { message.textContent = 'Could not send the remote command.'; } finally { buttons.forEach(item => item.disabled = false); }
+    return;
+  }
+  const scene = event.target.closest('button[data-scene]');
+  if (scene) {
+    const index = Number(scene.dataset.scene); document.querySelectorAll('button').forEach(item => { item.disabled = true; }); message.textContent = `Running ${scenes[index].name}…`;
+    try { const response = await fetch(`/api/scenes/${index}/run`, {method:'POST'}); if (!response.ok) throw Error(); const result = await response.json(); const failed = result.results.filter(item => !item.ok).map(item => item.name); message.textContent = failed.length ? `Scene completed with failures: ${failed.join(', ')}.` : `${result.name} completed.`; }
+    catch (_) { message.textContent = 'Could not run scene.'; } finally { render(); } return;
+  }
+  const input = event.target.closest('button[data-input]');
+  if (input) {
+    document.querySelectorAll('button').forEach(item => { item.disabled = true; }); message.textContent = `Selecting ${input.dataset.input.replace('Input', '')}…`;
+    try { const response = await fetch(`/api/${input.dataset.target}/input/${input.dataset.input}`, {method:'POST'}); if (!response.ok) throw Error(); const results = await response.json(); const failed = results.filter(result => !result.ok).map(result => result.name); message.textContent = failed.length ? `Could not reach: ${failed.join(', ')}.` : `${results[0].name}: input selected.`; }
+    catch (_) { message.textContent = 'Could not select the input.'; } finally { render(); } return;
+  }
+  const launch = event.target.closest('button.launch-app');
+  if (launch) {
+    const appId = launch.parentElement.querySelector('select').value; if (!appId) return; launch.disabled = true; message.textContent = 'Opening app…';
+    try { const response = await fetch(`/api/${launch.dataset.target}/launch`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({app_id: appId})}); if (!response.ok) throw Error(); const result = await response.json(); message.textContent = result[0].ok ? `${result[0].name}: app opened.` : `Could not reach ${result[0].name}.`; }
+    catch (_) { message.textContent = 'Could not open the app.'; } finally { launch.disabled = false; } return;
+  }
   const button = event.target.closest('button[data-action]'); if (!button) return;
   const buttons = [...document.querySelectorAll('button[data-action]')]; buttons.forEach(item => item.disabled = true);
   const action = button.dataset.action; message.textContent = `Sending ${action} command…`;
@@ -120,4 +175,5 @@ document.addEventListener('click', async event => {
 });
 
 load();
+document.querySelector('#close-remote').addEventListener('click', () => { document.querySelector('#remote-panel').hidden = true; remoteIndex = null; });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');

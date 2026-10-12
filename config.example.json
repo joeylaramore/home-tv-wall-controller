@@ -1,1 +1,17 @@
-{"tvs": []}
+{
+  "tvs": [],
+  "scenes": [
+    {
+      "name": "NFL Sunday Ticket",
+      "actions": [
+        {"target": "all", "command": "launch_name", "value": "YouTube TV"}
+      ]
+    },
+    {
+      "name": "2x2 Apple TV Wall",
+      "actions": [
+        {"target": "all", "command": "keypress", "value": "InputHDMI1"}
+      ]
+    }
+  ]
+}

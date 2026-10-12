@@ -27,6 +27,13 @@ MAX_CONFIG_BYTES = 256 * 1024
 LOCAL_NETWORKS = tuple(ipaddress.ip_network(value) for value in
                        ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"))
 TVS = []
+SCENES = []
+KEYPRESS_ACTIONS = {
+    "Home", "Back", "Up", "Down", "Left", "Right", "Select",
+    "Play", "Rev", "Fwd", "InstantReplay", "Info", "Search",
+    "VolumeUp", "VolumeDown", "VolumeMute", "PowerOff",
+    "InputTuner", "InputHDMI1", "InputHDMI2", "InputHDMI3", "InputHDMI4", "InputAV1",
+}
 
 
 def local_address(value):
@@ -36,8 +43,8 @@ def local_address(value):
 
 def validate_config(payload):
     """Validate the existing config format; list order is the wall layout."""
-    if not isinstance(payload, dict) or set(payload) != {"tvs"}:
-        raise ValueError('Configuration must contain only a "tvs" list')
+    if not isinstance(payload, dict) or set(payload) - {"tvs", "scenes"} or "tvs" not in payload:
+        raise ValueError('Configuration must contain a "tvs" list and optional "scenes"')
     devices = payload["tvs"]
     if not isinstance(devices, list) or len(devices) > 100:
         raise ValueError("Provide a list of no more than 100 TVs")
@@ -65,7 +72,39 @@ def validate_config(payload):
         if tv["ip"] and not local_address(tv["ip"]):
             raise ValueError("Cached TV addresses must be private LAN addresses")
         configured.append(tv)
-    return {"tvs": configured}
+    scenes = []
+    for index, item in enumerate(payload.get("scenes", [])):
+        if not isinstance(item, dict) or set(item) != {"name", "actions"}:
+            raise ValueError(f"Scene {index + 1} has invalid fields")
+        name = item.get("name")
+        actions = item.get("actions")
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
+            raise ValueError(f"Scene {index + 1} has an invalid name")
+        if not isinstance(actions, list) or not 1 <= len(actions) <= 32:
+            raise ValueError(f"Scene {index + 1} must contain 1 to 32 actions")
+        checked = []
+        for action_index, action in enumerate(actions):
+            if not isinstance(action, dict) or set(action) != {"target", "command", "value"}:
+                raise ValueError(f"Scene {index + 1}, action {action_index + 1} has invalid fields")
+            target, command_name, value = action["target"], action["command"], action["value"]
+            if not isinstance(target, str) or (target != "all" and not target.isdigit()):
+                raise ValueError(f"Scene {index + 1}, action {action_index + 1} has an invalid target")
+            if target != "all" and int(target) >= len(configured):
+                raise ValueError(f"Scene {index + 1}, action {action_index + 1} targets an unknown TV")
+            if command_name not in ("keypress", "launch", "launch_name") or not isinstance(value, str) or not value:
+                raise ValueError(f"Scene {index + 1}, action {action_index + 1} is invalid")
+            if len(value) > 100 or any(ord(c) < 32 for c in value):
+                raise ValueError(f"Scene {index + 1}, action {action_index + 1} has an invalid value")
+            if command_name == "keypress" and value not in KEYPRESS_ACTIONS:
+                raise ValueError(f"Scene {index + 1}, action {action_index + 1} has an unsupported key")
+            if command_name == "launch" and not re.fullmatch(r"[A-Za-z0-9._:-]+", value):
+                raise ValueError(f"Scene {index + 1}, action {action_index + 1} has an invalid app ID")
+            checked.append({"target": target, "command": command_name, "value": value})
+        scenes.append({"name": name.strip(), "actions": checked})
+    result = {"tvs": configured}
+    if "scenes" in payload:
+        result["scenes"] = scenes
+    return result
 
 
 def atomic_write(path, data):
@@ -94,6 +133,7 @@ def save_config(payload):
         atomic_write(backup, previous)
         atomic_write(CONFIG_PATH, data)
         TVS[:] = config["tvs"]
+        SCENES[:] = config.get("scenes", [])
     return backup.name
 
 
@@ -230,10 +270,49 @@ def send_keypress(tv, action, ip):
         return {"name": tv["name"], "ok": False, "error": str(exc)}
 
 
+def send_launch(tv, app_id, ip):
+    try:
+        host = f"[{ip}]" if ":" in ip else ip
+        request = urllib.request.Request(
+            f"http://{host}:8060/launch/{urllib.parse.quote(app_id, safe='')}", data=b"", method="POST"
+        )
+        with urllib.request.urlopen(request, timeout=4) as response:
+            return {"name": tv["name"], "ok": response.status == 200}
+    except Exception as exc:
+        return {"name": tv["name"], "ok": False, "error": str(exc)}
+
+
+def query_apps(ip):
+    host = f"[{ip}]" if ":" in ip else ip
+    with urllib.request.urlopen(f"http://{host}:8060/query/apps", timeout=4) as response:
+        root = ET.fromstring(response.read(65536))
+    return [{"id": item.attrib.get("id", ""), "name": item.text or ""}
+            for item in root.findall("app") if item.attrib.get("id") and item.text]
+
+
 def command(tv, action):
     """Resolve and send one command."""
     try:
         return send_keypress(tv, action, resolve(tv))
+    except Exception as exc:
+        return {"name": tv["name"], "ok": False, "error": str(exc)}
+
+
+def run_action(tv, action, ip=None):
+    try:
+        address = ip or resolve(tv)
+        if action["command"] == "launch_name":
+            apps = query_apps(address)
+            wanted = action["value"].casefold()
+            match = next((app for app in apps if app["name"].casefold() == wanted), None)
+            if not match:
+                match = next((app for app in apps if wanted in app["name"].casefold()), None)
+            if not match:
+                raise ConnectionError(f"{action['value']} is not installed")
+            return send_launch(tv, match["id"], address)
+        if action["command"] == "launch":
+            return send_launch(tv, action["value"], address)
+        return send_keypress(tv, action["value"], address)
     except Exception as exc:
         return {"name": tv["name"], "ok": False, "error": str(exc)}
 
@@ -266,6 +345,23 @@ def command_many(tvs, action):
         return [future.result() for future in futures]
 
 
+def action_many(tvs, action):
+    """Resolve every TV first, then execute one scene action in parallel."""
+    def resolve_one(tv):
+        try:
+            return tv, resolve(tv), None
+        except Exception as exc:
+            return tv, None, exc
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(16, max(1, len(tvs)))) as pool:
+        resolved = list(pool.map(resolve_one, tvs))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(16, max(1, len(resolved)))) as pool:
+        futures = [pool.submit(run_action, tv, action, ip) if not error
+                   else pool.submit(lambda item: {"name": item[0]["name"], "ok": False, "error": str(item[2])}, item)
+                   for item in resolved for tv, ip, error in [item]]
+        return [future.result() for future in futures]
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     timeout = 10
 
@@ -295,6 +391,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             with CONFIG_LOCK:
                 devices = [dict(tv, paired=bool(tv.get("device_id") or tv.get("mac"))) for tv in TVS]
             return self.reply(200, devices)
+        if re.fullmatch(r"/api/apps/[0-9]{1,3}", self.path):
+            index = int(self.path.rsplit("/", 1)[1])
+            with CONFIG_LOCK:
+                if index >= len(TVS):
+                    return self.reply(404, {"error": "Unknown TV"})
+                tv = TVS[index]
+            try:
+                return self.reply(200, query_apps(resolve(tv)))
+            except Exception as exc:
+                return self.reply(502, {"error": str(exc)})
+        if self.path == "/api/scenes":
+            with CONFIG_LOCK:
+                return self.reply(200, SCENES)
         return super().do_GET()
 
     def do_HEAD(self):
@@ -319,12 +428,64 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 if not 0 < length <= MAX_CONFIG_BYTES:
                     raise ValueError("Configuration must be between 1 and 262144 bytes")
                 payload = json.loads(self.rfile.read(length))
+                if self.path == "/api/configure" and isinstance(payload, dict) and "scenes" not in payload:
+                    with CONFIG_LOCK:
+                        payload["scenes"] = list(SCENES)
                 backup = save_config(payload)
             except (ValueError, UnicodeError, RecursionError) as exc:
                 return self.reply(400, {"error": str(exc)})
             except OSError:
                 return self.reply(500, {"error": "Could not save configuration; previous settings remain active"})
             return self.reply(200, {"ok": True, "count": len(TVS), "previous_backup": backup})
+        scene_match = re.fullmatch(r"/api/scenes/([0-9]{1,3})/run", self.path)
+        if scene_match:
+            index = int(scene_match.group(1))
+            with CONFIG_LOCK:
+                if index >= len(SCENES):
+                    return self.reply(404, {"error": "Unknown scene"})
+                scene = dict(SCENES[index])
+                actions = list(scene["actions"])
+                tvs = list(TVS)
+            results = []
+            for action in actions:
+                targets = tvs if action["target"] == "all" else [tvs[int(action["target"])] ]
+                results.extend(action_many(targets, action))
+            return self.reply(200, {"name": scene["name"], "results": results})
+        input_match = re.fullmatch(r"/api/(all|[0-9]{1,3})/input/(Input(?:HDMI[1-4]|Tuner|AV1))", self.path)
+        if input_match:
+            target = input_match.group(1)
+            with CONFIG_LOCK:
+                targets = list(TVS) if target == "all" else ([TVS[int(target)]] if int(target) < len(TVS) else [])
+            if not targets:
+                return self.reply(404, {"error": "Unknown TV"})
+            action = {"target": target, "command": "keypress", "value": input_match.group(2)}
+            return self.reply(200, action_many(targets, action))
+        launch_match = re.fullmatch(r"/api/([0-9]{1,3})/launch", self.path)
+        if launch_match:
+            index = int(launch_match.group(1))
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length)) if 0 < length <= 1024 else {}
+                app_id = payload.get("app_id", "")
+                if not re.fullmatch(r"[A-Za-z0-9._:-]+", app_id):
+                    raise ValueError("Invalid app ID")
+            except (ValueError, TypeError, json.JSONDecodeError):
+                return self.reply(400, {"error": "Invalid app ID"})
+            with CONFIG_LOCK:
+                if index >= len(TVS):
+                    return self.reply(404, {"error": "Unknown TV"})
+                tv = TVS[index]
+            return self.reply(200, [run_action(tv, {"command": "launch", "value": app_id})])
+        key_match = re.fullmatch(r"/api/([0-9]{1,3})/keypress/([A-Za-z0-9]+)", self.path)
+        if key_match:
+            index, key = int(key_match.group(1)), key_match.group(2)
+            if key not in KEYPRESS_ACTIONS:
+                return self.reply(400, {"error": "Unsupported key"})
+            with CONFIG_LOCK:
+                if index >= len(TVS):
+                    return self.reply(404, {"error": "Unknown TV"})
+                tv = TVS[index]
+            return self.reply(200, [command(tv, key)])
         if (len(parts) != 4 or parts[1] != "api" or
                 (parts[2] != "all" and not re.fullmatch(r"[0-9]{1,3}", parts[2])) or
                 parts[3] not in ("on", "off")):
@@ -388,7 +549,9 @@ if __name__ == "__main__":
     if not CONFIG_PATH.exists():
         sys.exit("Copy config.example.json to config.json and set four TV identities")
     try:
-        TVS = validate_config(json.loads(CONFIG_PATH.read_text(encoding="utf-8")))["tvs"]
+        loaded_config = validate_config(json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
+        TVS = loaded_config["tvs"]
+        SCENES = loaded_config.get("scenes", [])
         allowed_networks = LOCAL_NETWORKS + tuple(ipaddress.ip_network(value.strip()) for value in
             os.environ.get("ROKU_ALLOWED_CIDRS", "").split(",") if value.strip())
     except ValueError as exc:
