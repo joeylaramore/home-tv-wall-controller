@@ -25,7 +25,7 @@ For example, this scene opens YouTube TV on every screen:
 A 2x2 Apple TV wall scene can switch every TV to the processor input:
 
 ```json
-{"name":"2x2 Game Wall","actions":[{"target":"all","command":"keypress","value":"InputHDMI3"}]}
+{"name":"2x2 Game Wall","actions":[{"target":"all","command":"keypress","value":"InputHDMI4"}]}
 ```
 
 Separate TV actions can be combined in one scene, but selecting a different live game automatically on each YouTube TV screen requires deep-link support from the installed service.

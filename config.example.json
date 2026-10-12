@@ -10,7 +10,7 @@
     {
       "name": "2x2 Apple TV Wall",
       "actions": [
-        {"target": "all", "command": "keypress", "value": "InputHDMI3"}
+        {"target": "all", "command": "keypress", "value": "InputHDMI4"}
       ]
     }
   ]
