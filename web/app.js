@@ -21,6 +21,7 @@ function render() {
     const heading = editing ? document.createElement('input') : document.createElement('h2');
     if (editing) { heading.className = 'tile-name'; heading.value = tv.name; heading.setAttribute('aria-label', `Name for TV ${index + 1}`); heading.addEventListener('input', () => { tv.name = heading.value; }); }
     else heading.textContent = tv.name;
+    const status = document.createElement('p'); status.className = 'tile-status'; status.textContent = tv.ip ? 'Ready on local network' : 'Identity saved';
     const actions = document.createElement('div'); actions.className = 'tile-buttons';
     for (const [label, action] of [['On', 'on'], ['Off', 'off']]) {
       const button = document.createElement('button'); button.textContent = label; button.className = action;
@@ -32,7 +33,7 @@ function render() {
     const select = document.createElement('select'); select.className = 'app-select'; select.setAttribute('aria-label', `App for ${tv.name}`); select.disabled = editing;
     const placeholder = document.createElement('option'); placeholder.textContent = 'Loading apps…'; placeholder.value = ''; select.append(placeholder);
     const launch = document.createElement('button'); launch.textContent = 'Open app'; launch.className = 'launch-app'; launch.dataset.target = index; launch.disabled = editing;
-    apps.append(select, launch); tile.append(heading, actions, inputs, apps); grid.append(tile); loadApps(index, select);
+    apps.append(select, launch); tile.append(heading, status, actions, inputs, apps); grid.append(tile); loadApps(index, select);
     if (editing) {
       tile.addEventListener('dragstart', () => { draggedIndex = index; tile.classList.add('dragging'); });
       tile.addEventListener('dragend', () => tile.classList.remove('dragging'));
@@ -59,7 +60,7 @@ async function loadScenes() {
   const container = document.querySelector('#scenes');
   try {
     const response = await fetch('/api/scenes', {cache:'no-store'}); if (!response.ok) throw Error(); scenes = await response.json(); container.replaceChildren();
-    scenes.forEach((scene, index) => { const button = document.createElement('button'); button.textContent = scene.name; button.dataset.scene = index; container.append(button); }); container.hidden = !scenes.length;
+    scenes.forEach((scene, index) => { const button = document.createElement('button'); button.dataset.scene = index; const title = document.createElement('strong'); title.textContent = scene.name; const detail = document.createElement('span'); detail.textContent = scene.name.toLowerCase().includes('2x2') ? 'Switch all TVs to the video wall and manage audio.' : 'Open the best available live coverage on the wall.'; button.append(title, detail); container.append(button); }); container.hidden = !scenes.length;
   } catch (_) { container.hidden = true; }
 }
 
