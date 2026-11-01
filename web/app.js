@@ -151,6 +151,19 @@ restoreFile.addEventListener('change', async () => {
 });
 
 document.addEventListener('click', async event => {
+  if (event.target.closest('#open-youtube-nfl')) {
+    const button = event.target.closest('#open-youtube-nfl');
+    if (!tvs.length) { message.textContent = 'Add TVs to the wall first.'; return; }
+    button.disabled = true;
+    message.textContent = 'Opening the YouTube app on all TVs…';
+    try {
+      const results = await Promise.all(tvs.map((tv, index) => fetch(`/api/${index}/launch`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({app_id:'837'})}).then(async response => { const value = await response.json(); if (!response.ok) throw Error(value.error || 'Could not open YouTube.'); return value[0]; })));
+      const failed = results.filter(result => !result.ok).map(result => result.name);
+      message.textContent = failed.length ? `Could not open YouTube on: ${failed.join(', ')}.` : 'YouTube opened on all TVs. Search “NFL” in YouTube and select the NFL channel page to choose a live game.';
+    } catch (error) { message.textContent = error.message || 'Could not open YouTube.'; }
+    finally { button.disabled = false; }
+    return;
+  }
   if (event.target.closest('#find-games')) {
     const button = event.target.closest('#find-games'); button.disabled = true; message.textContent = 'Looking for live games…';
     try { const response = await fetch('/api/youtube/live-games', {cache:'no-store'}); const result = await response.json(); if (!response.ok) throw Error(result.error || 'Live-game lookup failed.'); liveGames = result; renderGames(); message.textContent = liveGames.length ? `${liveGames.length} live games found. Choose one for each TV.` : 'No live games found.'; }
@@ -159,7 +172,7 @@ document.addEventListener('click', async event => {
   }
   if (event.target.closest('#play-games')) {
     const selects = [...document.querySelectorAll('select[data-game-target]')]; document.querySelectorAll('#game-picker button, #game-picker select').forEach(item => { item.disabled = true; }); message.textContent = 'Launching selected games…';
-    try { const chosen = selects.filter(select => select.value); if (new Set(chosen.map(select => select.value)).size !== chosen.length) throw Error('Choose a different game for each TV.'); const results = await Promise.all(chosen.map(select => fetch(`/api/${select.dataset.gameTarget}/launch-content`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({app_id:'837', content_id:select.value, media_type:'shortFormVideo'})}).then(async response => { const value = await response.json(); if (!response.ok) throw Error(value.error || 'Launch failed.'); return value[0]; }))); const failed = results.filter(result => !result.ok).map(result => result.name); message.textContent = failed.length ? `Could not reach: ${failed.join(', ')}.` : `${results.length} different games launched.`; }
+    try { const chosen = selects.filter(select => select.value); if (new Set(chosen.map(select => select.value)).size !== chosen.length) throw Error('Choose a different game for each TV.'); const results = await Promise.all(chosen.map(select => fetch(`/api/${select.dataset.gameTarget}/launch-content`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({app_id:'837', content_id:select.value, media_type:'tvSpecial'})}).then(async response => { const value = await response.json(); if (!response.ok) throw Error(value.error || 'Launch failed.'); return value[0]; }))); const failed = results.filter(result => !result.ok).map(result => result.name); message.textContent = failed.length ? `Could not reach: ${failed.join(', ')}.` : `${results.length} different games launched.`; }
     catch (error) { message.textContent = error.message || 'Could not launch selected games.'; } finally { document.querySelectorAll('#game-picker button, #game-picker select').forEach(item => { item.disabled = false; }); }
     return;
   }
@@ -209,7 +222,7 @@ function renderDiscoveredDevices(result) {
   const groups = [['sonos','Sonos speakers'], ['lg','LG TVs']];
   groups.forEach(([type,label]) => { const heading=document.createElement('h3'); heading.textContent=`${label} (${result[type].length})`; container.append(heading); result[type].forEach(device => { const card=document.createElement('article'); card.className='device-card'; const title=document.createElement('strong'); title.textContent=device.name; const address=document.createElement('span'); address.textContent=device.address; card.append(title,address); if(type==='sonos'){ const controls=document.createElement('div'); controls.className='device-controls'; ['play','pause','mute'].forEach(command=>{const b=document.createElement('button');b.textContent=command[0].toUpperCase()+command.slice(1);b.dataset.sonos=command;b.dataset.address=device.address;controls.append(b);}); card.append(controls); } container.append(card); }); });
 }
-document.querySelector('#discover-devices').addEventListener('click', async event => { const button=event.currentTarget; button.disabled=true; message.textContent='Looking for Sonos speakers and LG TVs on this Wi-Fi�'; try { const response=await fetch('/api/devices/discover',{cache:'no-store'}); const result=await response.json(); if(!response.ok) throw Error(result.error||'Discovery failed.'); renderDiscoveredDevices(result); message.textContent=`Found ${result.sonos.length} Sonos speaker${result.sonos.length===1?'':'s'} and ${result.lg.length} LG TV${result.lg.length===1?'':'s'}.`; } catch(error){message.textContent=error.message||'Device discovery failed.';} finally{button.disabled=false;} });
+document.querySelector('#discover-devices').addEventListener('click', async event => { const button=event.currentTarget; button.disabled=true; message.textContent='Looking for Sonos speakers and LG TVs on this Wi-Fi…'; try { const response=await fetch('/api/devices/discover',{cache:'no-store'}); const result=await response.json(); if(!response.ok) throw Error(result.error||'Discovery failed.'); renderDiscoveredDevices(result); message.textContent=`Found ${result.sonos.length} Sonos speaker${result.sonos.length===1?'':'s'} and ${result.lg.length} LG TV${result.lg.length===1?'':'s'}.`; } catch(error){message.textContent=error.message||'Device discovery failed.';} finally{button.disabled=false;} });
 document.addEventListener('click', async event => { const button=event.target.closest('button[data-sonos]'); if(!button)return; button.disabled=true; try { const response=await fetch(`/api/devices/sonos/${button.dataset.sonos}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({address:button.dataset.address})}); if(!response.ok) throw Error(); message.textContent=`Sonos ${button.dataset.sonos} command sent.`; } catch(_){message.textContent='Could not control that Sonos speaker.';} finally{button.disabled=false;} });
 document.querySelectorAll('.bottom-nav button').forEach(button => button.addEventListener('click', () => { const page=button.dataset.page; document.querySelectorAll('.bottom-nav button').forEach(item=>item.classList.toggle('active',item===button)); document.querySelectorAll('main > .page').forEach(item=>item.hidden=item.id!==page); const settings=document.querySelector('#settings-page'); if(settings){ settings.hidden=page!=='settings-page'; if(page==='settings-page') settings.open=true; } window.scrollTo(0,0); }));
 
