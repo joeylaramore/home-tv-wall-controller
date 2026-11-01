@@ -31,7 +31,7 @@ function render() {
     for (let input = 1; input <= 4; input++) { const button = document.createElement('button'); button.textContent = `HDMI ${input}`; button.dataset.target = index; button.dataset.input = `InputHDMI${input}`; button.disabled = editing; inputs.append(button); }
     const apps = document.createElement('div'); apps.className = 'app-controls';
     const select = document.createElement('select'); select.className = 'app-select'; select.setAttribute('aria-label', `App for ${tv.name}`); select.disabled = editing;
-    const placeholder = document.createElement('option'); placeholder.textContent = 'Loading appsâ€¦'; placeholder.value = ''; select.append(placeholder);
+    const placeholder = document.createElement('option'); placeholder.textContent = 'Loading apps…'; placeholder.value = ''; select.append(placeholder);
     const launch = document.createElement('button'); launch.textContent = 'Open app'; launch.className = 'launch-app'; launch.dataset.target = index; launch.disabled = editing;
     apps.append(select, launch); tile.append(heading, status, actions, inputs, apps); grid.append(tile); loadApps(index, select);
     if (editing) {
@@ -85,7 +85,7 @@ async function load() {
 }
 
 document.querySelector('#discover').addEventListener('click', async () => {
-  message.textContent = 'Looking for Roku TVs on this networkâ€¦';
+  message.textContent = 'Looking for Roku TVs on this network…';
   try {
     const response = await fetch('/api/discover', {cache:'no-store'}); if (!response.ok) throw Error();
     found = await response.json(); discovered.replaceChildren();
@@ -93,7 +93,7 @@ document.querySelector('#discover').addEventListener('click', async () => {
     found.forEach((device, index) => {
       const row = document.createElement('label'); row.className = 'found';
       const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = true; checkbox.dataset.index = index;
-      const text = document.createElement('span'); text.textContent = `${device['user-device-name'] || device['model-name'] || 'Roku TV'} Â· ${device['wifi-mac'] || device['ethernet-mac'] || device['device-id']}`;
+      const text = document.createElement('span'); text.textContent = `${device['user-device-name'] || device['model-name'] || 'Roku TV'} · ${device['wifi-mac'] || device['ethernet-mac'] || device['device-id']}`;
       row.append(checkbox, text); discovered.append(row);
     });
     document.querySelector('#save').hidden = false; message.textContent = `${found.length} Roku TV${found.length === 1 ? '' : 's'} found.`;
@@ -152,13 +152,13 @@ restoreFile.addEventListener('change', async () => {
 
 document.addEventListener('click', async event => {
   if (event.target.closest('#find-games')) {
-    const button = event.target.closest('#find-games'); button.disabled = true; message.textContent = 'Looking for live gamesâ€¦';
+    const button = event.target.closest('#find-games'); button.disabled = true; message.textContent = 'Looking for live games…';
     try { const response = await fetch('/api/youtube/live-games', {cache:'no-store'}); const result = await response.json(); if (!response.ok) throw Error(result.error || 'Live-game lookup failed.'); liveGames = result; renderGames(); message.textContent = liveGames.length ? `${liveGames.length} live games found. Choose one for each TV.` : 'No live games found.'; }
     catch (error) { message.textContent = error.message || 'Live-game lookup failed.'; } finally { button.disabled = false; }
     return;
   }
   if (event.target.closest('#play-games')) {
-    const selects = [...document.querySelectorAll('select[data-game-target]')]; document.querySelectorAll('#game-picker button, #game-picker select').forEach(item => { item.disabled = true; }); message.textContent = 'Launching selected gamesâ€¦';
+    const selects = [...document.querySelectorAll('select[data-game-target]')]; document.querySelectorAll('#game-picker button, #game-picker select').forEach(item => { item.disabled = true; }); message.textContent = 'Launching selected games…';
     try { const chosen = selects.filter(select => select.value); if (new Set(chosen.map(select => select.value)).size !== chosen.length) throw Error('Choose a different game for each TV.'); const results = await Promise.all(chosen.map(select => fetch(`/api/${select.dataset.gameTarget}/launch-content`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({app_id:'837', content_id:select.value, media_type:'tvSpecial'})}).then(async response => { const value = await response.json(); if (!response.ok) throw Error(value.error || 'Launch failed.'); return value[0]; }))); const failed = results.filter(result => !result.ok).map(result => result.name); message.textContent = failed.length ? `Could not reach: ${failed.join(', ')}.` : `${results.length} different games launched.`; }
     catch (error) { message.textContent = error.message || 'Could not launch selected games.'; } finally { document.querySelectorAll('#game-picker button, #game-picker select').forEach(item => { item.disabled = false; }); }
     return;
@@ -166,32 +166,32 @@ document.addEventListener('click', async event => {
   if (!editing && event.target.closest('.tile') && !event.target.closest('button, select, input')) { openRemote(Number(event.target.closest('.tile').dataset.index)); return; }
   const remote = event.target.closest('button[data-remote]');
   if (remote && remoteIndex !== null) {
-    const buttons = [...document.querySelectorAll('#remote-panel button')]; buttons.forEach(item => item.disabled = true); message.textContent = `Sending ${remote.textContent}â€¦`;
+    const buttons = [...document.querySelectorAll('#remote-panel button')]; buttons.forEach(item => item.disabled = true); message.textContent = `Sending ${remote.textContent}…`;
     try { const response = await fetch(`/api/${remoteIndex}/keypress/${remote.dataset.remote}`, {method:'POST'}); if (!response.ok) throw Error(); const result = await response.json(); message.textContent = result[0].ok ? `${result[0].name}: command sent.` : `Could not reach ${result[0].name}.`; }
     catch (_) { message.textContent = 'Could not send the remote command.'; } finally { buttons.forEach(item => item.disabled = false); }
     return;
   }
   const scene = event.target.closest('button[data-scene]');
   if (scene) {
-    const index = Number(scene.dataset.scene); document.querySelectorAll('button').forEach(item => { item.disabled = true; }); message.textContent = `Running ${scenes[index].name}â€¦`;
+    const index = Number(scene.dataset.scene); document.querySelectorAll('button').forEach(item => { item.disabled = true; }); message.textContent = `Running ${scenes[index].name}…`;
     try { const response = await fetch(`/api/scenes/${index}/run`, {method:'POST'}); if (!response.ok) throw Error(); const result = await response.json(); const failed = result.results.filter(item => !item.ok).map(item => item.name); message.textContent = failed.length ? `Scene completed with failures: ${failed.join(', ')}.` : `${result.name} completed.`; }
     catch (_) { message.textContent = 'Could not run scene.'; } finally { render(); } return;
   }
   const input = event.target.closest('button[data-input]');
   if (input) {
-    document.querySelectorAll('button').forEach(item => { item.disabled = true; }); message.textContent = `Selecting ${input.dataset.input.replace('Input', '')}â€¦`;
+    document.querySelectorAll('button').forEach(item => { item.disabled = true; }); message.textContent = `Selecting ${input.dataset.input.replace('Input', '')}…`;
     try { const response = await fetch(`/api/${input.dataset.target}/input/${input.dataset.input}`, {method:'POST'}); if (!response.ok) throw Error(); const results = await response.json(); const failed = results.filter(result => !result.ok).map(result => result.name); message.textContent = failed.length ? `Could not reach: ${failed.join(', ')}.` : `${results[0].name}: input selected.`; }
     catch (_) { message.textContent = 'Could not select the input.'; } finally { render(); } return;
   }
   const launch = event.target.closest('button.launch-app');
   if (launch) {
-    const appId = launch.parentElement.querySelector('select').value; if (!appId) return; launch.disabled = true; message.textContent = 'Opening appâ€¦';
+    const appId = launch.parentElement.querySelector('select').value; if (!appId) return; launch.disabled = true; message.textContent = 'Opening app…';
     try { const response = await fetch(`/api/${launch.dataset.target}/launch`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({app_id: appId})}); if (!response.ok) throw Error(); const result = await response.json(); message.textContent = result[0].ok ? `${result[0].name}: app opened.` : `Could not reach ${result[0].name}.`; }
     catch (_) { message.textContent = 'Could not open the app.'; } finally { launch.disabled = false; } return;
   }
   const button = event.target.closest('button[data-action]'); if (!button) return;
   const buttons = [...document.querySelectorAll('button[data-action]')]; buttons.forEach(item => item.disabled = true);
-  const action = button.dataset.action; message.textContent = `Sending ${action} commandâ€¦`;
+  const action = button.dataset.action; message.textContent = `Sending ${action} command…`;
   try {
     const response = await fetch(`/api/${button.dataset.target}/${action}`, {method:'POST'}); if (!response.ok) throw Error();
     const results = await response.json(); const failed = results.filter(result => !result.ok).map(result => result.name);
