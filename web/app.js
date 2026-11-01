@@ -151,6 +151,19 @@ restoreFile.addEventListener('change', async () => {
 });
 
 document.addEventListener('click', async event => {
+  if (event.target.closest('#open-youtube-nfl')) {
+    const button = event.target.closest('#open-youtube-nfl');
+    if (!tvs.length) { message.textContent = 'Add TVs to the wall first.'; return; }
+    button.disabled = true;
+    message.textContent = 'Opening the YouTube app on all TVs…';
+    try {
+      const results = await Promise.all(tvs.map((tv, index) => fetch(`/api/${index}/launch`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({app_id:'837'})}).then(async response => { const value = await response.json(); if (!response.ok) throw Error(value.error || 'Could not open YouTube.'); return value[0]; })));
+      const failed = results.filter(result => !result.ok).map(result => result.name);
+      message.textContent = failed.length ? `Could not open YouTube on: ${failed.join(', ')}.` : 'YouTube opened on all TVs. Search “NFL” in YouTube and select the NFL channel page to choose a live game.';
+    } catch (error) { message.textContent = error.message || 'Could not open YouTube.'; }
+    finally { button.disabled = false; }
+    return;
+  }
   if (event.target.closest('#find-games')) {
     const button = event.target.closest('#find-games'); button.disabled = true; message.textContent = 'Looking for live games…';
     try { const response = await fetch('/api/youtube/live-games', {cache:'no-store'}); const result = await response.json(); if (!response.ok) throw Error(result.error || 'Live-game lookup failed.'); liveGames = result; renderGames(); message.textContent = liveGames.length ? `${liveGames.length} live games found. Choose one for each TV.` : 'No live games found.'; }
